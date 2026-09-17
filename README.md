@@ -14,7 +14,7 @@ The point is leverage, not bulk — a minimal customization of the stock tool th
 a second brain across projects and machines, without keel ever becoming a second
 product you maintain.
 
-> **Status:** v0.7, personal tool built in the open. Issues and PRs welcome and may be
+> **Status:** v0.8, personal tool built in the open. Issues and PRs welcome and may be
 > politely declined. Fork freely; that's what the licence is for.
 
 ---
@@ -63,7 +63,7 @@ allowed and what's forbidden, each with a docs link.
 |---|---|---|
 | **`keel`** | enabled | Security guard, ingest boundary, commit hygiene, activity log, query recall from your memory files, the `keel` CLI, and seven skills — `week` (what happened), `deck` (what's promised and what's next), `guide` (how all of it works), `setup` (configure this machine), `doctor` (diagnose and repair), `fleet` (put a repo on your CI and merge baseline), `reflect` (reason over a Hindsight bank in your session, citing what it drew on) |
 | **`keel-memory`** | **disabled** | Wires [Basic Memory](https://github.com/basicmachines-co/basic-memory) as a local MCP server over plain markdown |
-| **`keel-reflect`** | **disabled** | Wires a self-hosted [Hindsight](https://hindsight.vectorize.io) bank as an http MCP server — one memory across the machines you point at the same bank. URL and bank come from `keel setup`; see [NETWORKING.md](docs/NETWORKING.md) |
+| **`keel-reflect`** | **disabled** | Wires a self-hosted [Hindsight](https://hindsight.vectorize.io) bank as an http MCP server — one memory across the machines you point at the same bank. URL and bank come from `keel setup`; see [NETWORKING.md](docs/NETWORKING.md). Ships one skill — `retain` (one document per file, addressed by `keel retain-id`) |
 
 Adapters ship `defaultEnabled: false` — documented for *"plugins that add cost or scope a
 user should opt into"* — so they install dormant. One command turns each on.
@@ -241,6 +241,9 @@ keel search    what a Hindsight bank holds on a query, with sources;
                feeds the reflect skill. Logs each search's latency
                locally; --stats reads the log back
 keel doctor    verify prerequisites; exit 1 on problems                 (read-only)
+keel retain-id the id a memory file should be retained under, so the     (read-only)
+               address is computed instead of remembered; --audit
+               compares the Hindsight bank against the files on disk
 keel settings  recommended posture, each rule explained and linked
                (--list reads without applying; nothing is written
                 without a yes, and it only ever appends)
