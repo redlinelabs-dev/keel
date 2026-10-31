@@ -52,7 +52,15 @@
     ],
     "confirm": [
       {
-        "pattern": "\\b(?:curl|wget)\\b[^|]*\\|\\s*(?:sudo\\s+)?(?:sh|bash|zsh|python[0-9.]*|perl)\\b",
+        "pattern": "\\b(?:curl|wget)\\b[^|]*\\|\\s*(?:sudo\\s+)?(?:sh|bash|zsh)\\b(?!(?:\\s+-[a-z]+)*\\s+-[a-z]*c)",
+        "reason": "Piping a remote script directly into a shell (remote code execution)"
+      },
+      {
+        "pattern": "\\b(?:curl|wget)\\b[^|]*\\|\\s*(?:sudo\\s+)?python[0-9.]*\\b(?!(?:\\s+-[a-z]+)*\\s+-[a-z]*[cm]|(?:\\s+-[a-z]+)*\\s+[^\\s\\-;&|)])",
+        "reason": "Piping a remote script directly into a shell (remote code execution)"
+      },
+      {
+        "pattern": "\\b(?:curl|wget)\\b[^|]*\\|\\s*(?:sudo\\s+)?perl\\b(?!(?:\\s+-[a-z]+)*\\s+-[a-z]*e|(?:\\s+-[a-z]+)*\\s+[^\\s\\-;&|)])",
         "reason": "Piping a remote script directly into a shell (remote code execution)"
       },
       {
