@@ -424,7 +424,14 @@ async function retainDocuments(base) {
   const bank = hindsightBank();
   const items = [];
   for (let page = 0; page < 50; page++) {
-    const r = await hindsightGet(base, `/v1/default/banks/${encodeURIComponent(bank)}/documents?limit=100&offset=${items.length}`);
+    // fetch throws on a refused or timed-out connection, which is a normal
+    // answer from a homelab that is off; guarded like every other caller.
+    let r;
+    try {
+      r = await hindsightGet(base, `/v1/default/banks/${encodeURIComponent(bank)}/documents?limit=100&offset=${items.length}`);
+    } catch (e) {
+      return { error: `document list unreachable (${netReason(e)})` };
+    }
     if (r.status !== 200 || !Array.isArray(r.json?.items)) return { error: `document list answered ${r.status}` };
     if (!r.json.items.length) break;
     items.push(...r.json.items);

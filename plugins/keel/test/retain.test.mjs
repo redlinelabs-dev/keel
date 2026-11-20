@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { spawnSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -236,6 +237,25 @@ describe("doctor reports the ledger without being asked", () => {
     // The absent bank is the one problem; the ledger adds none of its own.
     assert.match(r.stdout, /(?<!\d)1 problem\(s\)/);
     assert.doesNotMatch(r.stdout, /stored under two document ids/);
+    rmSync(w.root, { recursive: true, force: true });
+  });
+
+  // fetch throws on a refused connection rather than answering; doctor and
+  // --audit must say so in their own words and finish, not crash mid-report.
+  test("an unreachable instance is unverified, and doctor still finishes", async () => {
+    const w = world({ "-proj": ["note.md"] });
+    const port = await new Promise((resolve) => {
+      const s = createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); });
+    });
+    writeFileSync(join(w.cfg, "settings.json"), JSON.stringify({ env: { KEEL_HINDSIGHT_URL: `http://127.0.0.1:${port}`, KEEL_HINDSIGHT_BANK: "personal" } }));
+    const d = keel(w, ["doctor"]);
+    assert.doesNotMatch(d.stderr, /at async|TypeError|fetch failed/, d.stderr);
+    assert.match(d.stdout, /retain ledger unverified\b.*document list unreachable/);
+    assert.match(d.stdout, /problem\(s\)|all good/);
+    const a = keel(w, ["retain-id", "--audit"]);
+    assert.doesNotMatch(a.stderr, /at async|TypeError|fetch failed/, a.stderr);
+    assert.match(a.stdout, /document list unreachable/);
+    assert.equal(a.status, 1);
     rmSync(w.root, { recursive: true, force: true });
   });
 });
