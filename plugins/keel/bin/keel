@@ -405,20 +405,38 @@ function retainId(p) {
   return { error: `no machine-independent id for a path outside $HOME: ${abs}` };
 }
 
-/** The file a document id refers to — the inverse of retainId, for auditing. */
+/**
+ * The file a document id refers to — the inverse of retainId, for auditing.
+ *
+ * The id comes from the bank, so it is data: a path that resolves outside
+ * $HOME and the config dir (`../../etc/x`, `/etc/x`) is not one keel would
+ * ever have derived, and is reported as naming no file instead of being
+ * stat'd. Existence and mtime are all the ledger reads, but they are still
+ * this machine's, not the bank's.
+ */
 function retainPath(id) {
-  if (id.startsWith("/")) return id; // a non-canonical absolute id, read as-is
-  if (id.startsWith("projects/")) {
-    const rest = id.slice("projects/".length).split("/");
-    if (rest.length === 3 && rest[1] === "memory") return join(CONFIG_DIR, "projects", rest[0], "memory", rest[2]);
+  let p;
+  if (id.startsWith("/")) p = id; // a non-canonical absolute id
+  else if (/^[a-z_]+:/i.test(id)) return null; // hand-written id, names no path at all
+  else {
+    const rest = id.startsWith("projects/") ? id.slice("projects/".length).split("/") : [];
+    p = rest.length === 3 && rest[1] === "memory"
+      ? join(CONFIG_DIR, "projects", rest[0], "memory", rest[2])
+      : join(homedir(), id);
   }
-  if (/^[a-z_]+:/i.test(id)) return null; // hand-written id, names no path at all
-  return join(homedir(), id);
+  const abs = resolve(p);
+  const inside = (root) => { const r = resolve(root); return abs.startsWith(`${r.replace(/\/+$/, "")}/`); };
+  return inside(homedir()) || inside(CONFIG_DIR) ? abs : null;
 }
+
+/** The endpoint's page cap. */
+const RETAIN_PAGE = 100;
 
 /**
  * Every document in the bank. Paged, because the endpoint caps at 100 and a
  * silently truncated ledger would report healthy files as never retained.
+ * A short page ends the list; `total` is not trusted, because an answer
+ * without it would otherwise end the list after the first page.
  */
 async function retainDocuments(base) {
   const bank = hindsightBank();
@@ -428,14 +446,13 @@ async function retainDocuments(base) {
     // answer from a homelab that is off; guarded like every other caller.
     let r;
     try {
-      r = await hindsightGet(base, `/v1/default/banks/${encodeURIComponent(bank)}/documents?limit=100&offset=${items.length}`);
+      r = await hindsightGet(base, `/v1/default/banks/${encodeURIComponent(bank)}/documents?limit=${RETAIN_PAGE}&offset=${items.length}`);
     } catch (e) {
       return { error: `document list unreachable (${netReason(e)})` };
     }
     if (r.status !== 200 || !Array.isArray(r.json?.items)) return { error: `document list answered ${r.status}` };
-    if (!r.json.items.length) break;
     items.push(...r.json.items);
-    if (items.length >= Number(r.json.total ?? items.length)) break;
+    if (r.json.items.length < RETAIN_PAGE) break;
   }
   return { items };
 }
@@ -1212,7 +1229,7 @@ async function cmdRetainId(argv) {
     console.log("");
   }
   if (l.unaddressable.length) {
-    console.log(`  ${c.bold("id names no file")} ${c.dim("— hand-written, so no retain can ever update it")}`);
+    console.log(`  ${c.bold("id names no file")} ${c.dim("— hand-written, or a path outside $HOME, so no retain can ever update it")}`);
     for (const u of l.unaddressable) console.log(`      ${u.id}`);
     console.log("");
   }
@@ -1762,10 +1779,14 @@ async function cmdDoctor() {
           console.log(`      fix: keel retain-id --audit ${c.dim("names the copy to keep and the one to drop")}`);
           problems += l.duplicates.length;
         }
-        const strays = l.noncanonical.length + l.unaddressable.length;
-        if (strays) {
-          console.log(`  ${c.yellow("!")} ${strays} document id(s) are not what keel would derive — the next retain adds a copy`);
+        if (l.noncanonical.length) {
+          console.log(`  ${c.yellow("!")} ${l.noncanonical.length} document id(s) are not what keel would derive — the next retain adds a copy`);
           console.log(`      ${c.dim("re-retain under the canonical id, then delete the old document")}`);
+          console.log(`      fix: keel retain-id --audit`);
+        }
+        if (l.unaddressable.length) {
+          console.log(`  ${c.yellow("!")} ${l.unaddressable.length} document id(s) name no file keel can address — no retain will ever update them`);
+          console.log(`      ${c.dim("delete each one, or re-retain its content from a file")}`);
           console.log(`      fix: keel retain-id --audit`);
         }
         if (l.orphans.length) {

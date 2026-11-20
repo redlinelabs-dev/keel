@@ -48,20 +48,26 @@ createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   const json = (o) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(o)); };
   let docs = [];
-  try { docs = JSON.parse(readFileSync(docsFile, "utf8")); } catch {}
+  let omitTotal = false;
+  try {
+    const raw = JSON.parse(readFileSync(docsFile, "utf8"));
+    if (Array.isArray(raw)) docs = raw; else ({ docs, omitTotal } = raw);
+  } catch {}
   if (url.pathname === "/health") return json({ status: "healthy" });
   if (url.pathname === "/v1/default/banks") return json({ banks: [{ bank_id: "personal", fact_count: 1 }] });
   if (url.pathname === "/v1/default/banks/personal/documents") {
     const limit = Number(url.searchParams.get("limit") ?? 100);
     const offset = Number(url.searchParams.get("offset") ?? 0);
-    return json({ items: docs.slice(offset, offset + limit), total: docs.length, limit, offset });
+    const page = { items: docs.slice(offset, offset + limit), total: docs.length, limit, offset };
+    if (omitTotal) delete page.total;
+    return json(page);
   }
   res.writeHead(404).end("{}");
 }).listen(0, "127.0.0.1", function () { console.log(this.address().port); });
 `;
 
-function setDocs(docs) {
-  writeFileSync(STUB.docsFile, JSON.stringify(docs));
+function setDocs(docs, { omitTotal = false } = {}) {
+  writeFileSync(STUB.docsFile, JSON.stringify(omitTotal ? { docs, omitTotal } : docs));
 }
 
 before(async () => {
@@ -215,6 +221,17 @@ describe("doctor reports the ledger without being asked", () => {
     rmSync(w.root, { recursive: true, force: true });
   });
 
+  // An answer without `total` once ended the list after the first full page.
+  test("paging does not depend on the instance reporting a total", () => {
+    const names = Array.from({ length: 120 }, (_, i) => `n${i}.md`);
+    const w = world({ "-proj": names });
+    setDocs(names.map((n) => doc(`projects/-proj/memory/${n}`)), { omitTotal: true });
+    const r = keel(w, ["doctor"]);
+    assert.equal(r.status, 0, r.stdout);
+    assert.match(r.stdout, /120 of 120 memory file\(s\) retained/);
+    rmSync(w.root, { recursive: true, force: true });
+  });
+
   test("the check has an off switch", () => {
     const w = world({ "-proj": ["note.md"] });
     setDocs([doc("projects/-proj/memory/note.md"), doc(join(w.cfg, "projects", "-proj", "memory", "note.md"))]);
@@ -280,6 +297,31 @@ describe("keel retain-id --audit names the repair", () => {
     setDocs([doc("memory:keel:some-machine")]);
     const r = keel(w, ["retain-id", "--audit"]);
     assert.match(r.stdout, /names no file/);
+    rmSync(w.root, { recursive: true, force: true });
+  });
+
+  // Ids are bank data. One that resolves outside $HOME and the config dir is
+  // reported, not stat'd, even when the file it points at exists.
+  test("an id that escapes $HOME names no file, even when the target exists", () => {
+    const w = world({ "-proj": ["note.md"] });
+    setDocs([doc("../../../../../../../../etc/hostname"), doc("/etc/hostname")]);
+    const r = keel(w, ["retain-id", "--audit"]);
+    const plain = r.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    const section = plain.split("id names no file")[1]?.split("\n\n")[0] ?? "";
+    assert.match(section, /\.\.\/etc\/hostname/, plain);
+    assert.match(section, /^\s+\/etc\/hostname$/m, plain);
+    assert.doesNotMatch(plain, /changed since it was retained|stored twice/);
+    rmSync(w.root, { recursive: true, force: true });
+  });
+
+  // doctor kept "the next retain adds a copy" for ids that have no file to
+  // retain from; each kind gets its own line and its own repair.
+  test("doctor names unaddressable ids separately from non-canonical ones", () => {
+    const w = world({ "-proj": ["note.md"] });
+    setDocs([doc("memory:keel:some-machine")]);
+    const plain = keel(w, ["doctor"]).stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    assert.match(plain, /1 document id\(s\) name no file keel can address/);
+    assert.doesNotMatch(plain, /next retain adds a copy/);
     rmSync(w.root, { recursive: true, force: true });
   });
 
