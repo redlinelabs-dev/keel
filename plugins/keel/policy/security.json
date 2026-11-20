@@ -50,7 +50,7 @@
         "reason": "Wipes filesystem signatures from a device"
       },
       {
-        "pattern": "(?<=(?:^|[;&|(\\n`]|\\$\\(|\\bssh\\b[^\\n;&|]{0,200}\\s['\"])\\s*(?:(?:sudo|command|exec|busybox|nohup|time)\\s+(?:-\\S+\\s+)*)*)(?:(?:/usr)?(?:/local)?/s?bin/)?(?:printenv|env)\\s*(?:\\||>|$)",
+        "pattern": "(?<=(?:^|[;&|(\\n`]|\\$\\(|\\bssh\\b[^\\n;&|]{0,200}\\s['\"])[ \\t]{0,16}(?:(?:sudo|command|exec|busybox|nohup|time)[ \\t]{1,16}(?:-\\S{1,32}[ \\t]{1,16}){0,8}){0,4})(?:(?:/usr)?(?:/local)?/s?bin/)?(?:printenv|env)\\s*(?:\\||>|$)",
         "reason": "Looks like an environment dump: env or printenv where a command starts, right before |, > or the end of the command. Rewrite and retry: in a search pattern write [e]nv and print[e]nv (process\\.[e]nv, Bun\\.[e]nv, ls | grep -E 'tok|[e]nv'). To read one variable, name it: printf '%s\\n' \"$HOME\". To list variable names without values, in bash: compgen -e. Never dump the environment."
       }
     ],
@@ -128,7 +128,7 @@
         "reason": "Prints a .env file, whose values land in the transcript sent to the model provider"
       },
       {
-        "pattern": "\\bfind\\b[^\\n;&|]{0,400}\\.env\\b[^\\n;&|]{0,400}(?:-exec(?:dir)?\\s+(?:cat|head|tail|less|more|bat|grep|strings)\\b|\\|\\s*xargs\\s+(?:-\\S+\\s+)*(?:cat|head|tail|less|more|bat|grep|strings)\\b)",
+        "pattern": "\\bfind\\b(?=[^\\n;&|]{0,200}\\.env\\b)[^\\n;&|]{0,400}?(?:-exec(?:dir)?\\s+(?:cat|head|tail|less|more|bat|grep|strings)\\b|\\|\\s*xargs\\s+(?:-\\S{1,32}\\s+){0,8}(?:cat|head|tail|less|more|bat|grep|strings)\\b)",
         "reason": "Prints .env files found by find, whose values land in the transcript sent to the model provider"
       },
       {
