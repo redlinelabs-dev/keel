@@ -95,9 +95,11 @@ or `$(`, or opening an `ssh` command's quoted string; optionally behind `sudo`, 
 `/usr` and `/usr/local` forms), right before `|`, `>` or the end. The reason
 shows how to search for the word without dumping (`[e]nv`). Outside command position the
 same words ask instead (behind `ssh`, `timeout` or `docker exec`, in a `{ }` group, run
-from a path such as `/opt/env` or `./env`, or as a bare argument), except in a quoted
-`grep`, `rg`, `ag` or `ack` pattern such as `"env|hook"`, and a path to a directory named
-`env` given as an argument (`ls apps/env`).
+from a path such as `/opt/env` or `./env`, or as a bare argument), except a quoted pattern
+that opens with `env|`, of a `grep`, `rg`, `ag` or `ack` that starts the command
+(`grep -E "env|hook"`), and a path to a directory named `env` given as an argument
+(`ls apps/env`). A quoted `|` reads as a command start, so `"hook|env|secret"` blocks with
+the rewrite: the agent retries, you aren't asked.
 Both are pattern checks on the command text, so some shapes reach neither (`"env" | grep`,
 `x=$(env)`, `scripts/env` without `./`, `stdbuf /opt/env`), and `bash.allow` exempts either.
 
