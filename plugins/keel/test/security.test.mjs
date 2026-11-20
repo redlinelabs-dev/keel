@@ -165,6 +165,19 @@ describe("git global options do not hide the subcommand", () => {
     test(`asks: ${name}`, () => assert.ok(isAsk(bash(cmd)), `should ask: ${cmd}`));
   }
   test("allows: -C before a plain push", () => assert.ok(isAllow(bash("git -C ~/src/app push origin main"))));
+
+  // The option skip once read `--force` as `-` + `-force` or `--` + `force`,
+  // and that ambiguity per flag backtracked exponentially: 24 long flags took
+  // most of a second. Pinned for both rules that share the skip.
+  test("many long flags before a non-matching subcommand stay fast", () => {
+    const flags = Array.from({ length: 40 }, (_, i) => `--flag${i}`).join(" ");
+    for (const cmd of [`git ${flags} status`, `git ${flags} config`]) {
+      const t = Date.now();
+      const r = bash(cmd);
+      assert.ok(Date.now() - t < 2000, `slow guard on ${cmd.slice(0, 40)}…`);
+      assert.ok(isAllow(r));
+    }
+  });
 });
 
 /**

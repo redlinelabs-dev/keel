@@ -76,7 +76,7 @@
         "reason": "Copying secrets to a remote host"
       },
       {
-        "pattern": "\\bgit(?:\\s+-{1,2}[^\\s=]+(?:=\\S*|\\s+[^\\s-]\\S*)?)*\\s+push\\b[^\\n]*(?:--force\\b|(?:^|\\s)-f\\b)",
+        "pattern": "\\bgit(?:\\s+-{1,2}[^\\s=-][^\\s=]*(?:=\\S*|\\s+[^\\s-]\\S*)?)*\\s+push\\b[^\\n]*(?:--force\\b|(?:^|\\s)-f\\b)",
         "reason": "Force-push rewrites remote history (protect shared and protected remotes)"
       },
       {
@@ -120,7 +120,7 @@
         "reason": "Dumps the whole environment, including any secrets in it"
       },
       {
-        "pattern": "\\bgit(?:\\s+-{1,2}[^\\s=]+(?:=\\S*|\\s+[^\\s-]\\S*)?)*\\s+config\\s+(?:--\\w+\\s+)*--list\\b",
+        "pattern": "\\bgit(?:\\s+-{1,2}[^\\s=-][^\\s=]*(?:=\\S*|\\s+[^\\s-]\\S*)?)*\\s+config\\s+(?:--\\w+\\s+)*--list\\b",
         "reason": "Prints git config, which commonly carries tokens in remote URLs"
       },
       {
