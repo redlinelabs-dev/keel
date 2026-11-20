@@ -76,7 +76,7 @@
         "reason": "Copying secrets to a remote host"
       },
       {
-        "pattern": "\\bgit(?:\\s+(?:-[Cc]\\s+\\S+|--(?:git-dir|work-tree|namespace)(?:=|\\s+)\\S+|--no-pager|-P|--bare))*\\s+push\\b[^\\n]*(?:--force\\b|(?:^|\\s)-f\\b)",
+        "pattern": "\\bgit(?:\\s+-{1,2}[^\\s=]+(?:=\\S*|\\s+[^\\s-]\\S*)?)*\\s+push\\b[^\\n]*(?:--force\\b|(?:^|\\s)-f\\b)",
         "reason": "Force-push rewrites remote history (protect shared and protected remotes)"
       },
       {
@@ -104,7 +104,7 @@
         "reason": "Reads an MCP server's credentials (env or headers) out of ~/.claude.json, into the shell or the transcript. If you did not ask for this, deny. Exits: allow rules in ~/.config/keel/policy.json"
       },
       {
-        "pattern": "(?:^|[\\s;&|(])(?:\\.|source)\\s+[\"']?[^\\s;&|]*(?:secret|credential|token|\\.env)\\b[\\s\\S]*\\b(?:curl|wget)\\b[^\\n]*(?:\\s-u\\s|\\s--user[\\s=]|authorization:|--oauth2-bearer|x-api-key)",
+        "pattern": "(?:^|[\\s;&|(])(?:\\.|source)\\s+[\"']?[^\\s;&|]*(?:secrets?|credentials?|tokens?|\\.env)\\b[\\s\\S]*\\b(?:curl|wget)\\b[^\\n]*(?:\\s-u\\s|\\s--user[\\s=]|authorization:|--oauth2-bearer|x-api-key)",
         "reason": "Loads secrets from a file into the shell, then sends them with an authenticated request. Confirm the destination is one you meant"
       },
       {
@@ -120,7 +120,7 @@
         "reason": "Dumps the whole environment, including any secrets in it"
       },
       {
-        "pattern": "\\bgit(?:\\s+(?:-[Cc]\\s+\\S+|--(?:git-dir|work-tree|namespace)(?:=|\\s+)\\S+|--no-pager|-P|--bare))*\\s+config\\s+(?:--\\w+\\s+)*--list\\b",
+        "pattern": "\\bgit(?:\\s+-{1,2}[^\\s=]+(?:=\\S*|\\s+[^\\s-]\\S*)?)*\\s+config\\s+(?:--\\w+\\s+)*--list\\b",
         "reason": "Prints git config, which commonly carries tokens in remote URLs"
       },
       {

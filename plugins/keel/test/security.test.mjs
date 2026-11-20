@@ -156,6 +156,10 @@ describe("git global options do not hide the subcommand", () => {
     ["--git-dir= before a force-push", "git --git-dir=/srv/app/.git push --force origin main"],
     ["-C before a config dump", "git -C ~/src/app config --list"],
     ["--no-pager before a config dump", "git --no-pager config --global --list"],
+    ["an unlisted global option", "git --exec-path=/x push --force origin main"],
+    ["an attached -c value", "git -cuser.name=x push -f origin main"],
+    ["a bare global flag", "git --literal-pathspecs push --force origin main"],
+    ["two global options", "git -C ~/src/app --no-pager config --list"],
   ];
   for (const [name, cmd] of asks) {
     test(`asks: ${name}`, () => assert.ok(isAsk(bash(cmd)), `should ask: ${cmd}`));
@@ -218,6 +222,9 @@ describe("confirm: loading an API token into the shell and sending it", () => {
     ["sourced secrets.env, then curl -u",
       `set -a; . ~/.config/app/secrets.env; set +a; curl -sS -u "$APP_EMAIL:$APP_TOKEN" 'https://api.example/x' | python3 -I -c 'import json,sys; json.load(sys.stdin)'`],
     ["sourced .env, then a bearer header", `source .env && curl -H "Authorization: Bearer $TOKEN" https://api.example/x`],
+    ["plural credentials file", `source ~/.app_credentials.sh && curl -u "$U:$T" https://api.example/x`],
+    ["plural tokens file", `. ./tokens.sh; curl -H "Authorization: Bearer $T" https://api.example/x`],
+    ["plural secrets file", `. ~/.config/app/secrets; curl -u "$U:$T" https://api.example/x`],
   ];
   for (const [name, cmd] of asks) {
     test(`asks: ${name}`, () => assert.ok(isAsk(bash(cmd)), `should ask: ${cmd}`));
