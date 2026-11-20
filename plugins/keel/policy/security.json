@@ -51,7 +51,7 @@
       },
       {
         "pattern": "(?<=(?:^|[;&|(\\n`]|\\$\\(|\\bssh\\b[^\\n;&|]{0,200}\\s['\"])\\s*(?:(?:sudo|command|exec|busybox|nohup|time)\\s+(?:-\\S+\\s+)*)*)(?:(?:/usr)?(?:/local)?/s?bin/)?(?:printenv|env)\\s*(?:\\||>|$)",
-        "reason": "Looks like an environment dump: the word env or printenv sits right before |, > or the end of the command. Rewrite and retry: in a search pattern write [e]nv and print[e]nv (process\\.[e]nv, Bun\\.[e]nv, ls | grep -E 'tok|[e]nv'). To read one variable, name it: printf '%s\\n' \"$HOME\". Never dump the environment."
+        "reason": "Looks like an environment dump: env or printenv where a command starts, right before |, > or the end of the command. Rewrite and retry: in a search pattern write [e]nv and print[e]nv (process\\.[e]nv, Bun\\.[e]nv, ls | grep -E 'tok|[e]nv'). To read one variable, name it: printf '%s\\n' \"$HOME\". To list variable names without values, in bash: compgen -e. Never dump the environment."
       }
     ],
     "confirm": [
@@ -120,8 +120,16 @@
         "reason": "Renders resolved compose config, interpolating every secret from .env into the output"
       },
       {
-        "pattern": "(?:(?<=\\b(?:cat|tac|less|more|head|tail|bat|nl|grep|egrep|fgrep|rg|ag|awk|sed|sort|uniq|cut|base64|xxd|od|hexdump|strings|jq|yq|diff|dd|tee|paste|column|fold|rev|tr|show)\\b[^\\n;&|]{0,400}[\\s/'\"=:])|(?<=<\\s{0,8}(?:['\"]?[^\\s;&|<>]{0,400}/|['\"])?))\\.env(?:\\.(?!(?:example|sample|template|dist)\\b)[\\w-]+)?(?=$|[\\s;&|>)'\"])",
+        "pattern": "(?<![\\w./~$\"'-])(?:printenv|env)\\s*(?:\\||>|$)|(?<=[\"'])(?<!\\b(?:e?grep|fgrep|rg|ag|ack)\\b[^\\n;&|'\"]{0,200}[\"'])(?:printenv|env)\\s*(?:\\||>|$)|(?<=[\"'])(?:printenv|env)(?:\\s*>|\\s*$|\\s+\\||\\|(?![^\\s|]))|(?<=\\bbin/)(?:printenv|env)\\s*(?:\\||>|$)",
+        "reason": "May dump the whole environment, including any secrets in it: env or printenv right before |, > or the end, behind a wrapper (ssh, timeout, docker exec, a { } group) or as an argument"
+      },
+      {
+        "pattern": "(?:(?<=\\b(?:cat|tac|less|more|head|tail|bat|nl|grep|egrep|fgrep|rg|ag|awk|sed|sort|uniq|cut|base64|xxd|od|hexdump|strings|diff|dd|tee|paste|column|fold|rev|tr|show|log|blame|sops|perl|ruby|iconv|fmt|pr|expand|look|xargs|vim?|view|nano|emacs)\\b[^\\n;&|]{0,400}[\\s/'\"=:])|(?<=<\\s{0,8}(?:['\"]?[^\\s;&|<>]{0,400}/|['\"])?))\\.env(?:\\.(?!(?:example|sample|template|dist)\\b)[\\w-]+)?(?=$|[\\s;&|>)'\"])",
         "reason": "Prints a .env file, whose values land in the transcript sent to the model provider"
+      },
+      {
+        "pattern": "\\bfind\\b[^\\n;&|]{0,400}\\.env\\b[^\\n;&|]{0,400}(?:-exec(?:dir)?\\s+(?:cat|head|tail|less|more|bat|grep|strings)\\b|\\|\\s*xargs\\s+(?:-\\S+\\s+)*(?:cat|head|tail|less|more|bat|grep|strings)\\b)",
+        "reason": "Prints .env files found by find, whose values land in the transcript sent to the model provider"
       },
       {
         "pattern": "\\bgit(?=(?<g>(?:\\s+(?:(?:-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--attr-source|--shallow-file)\\s+(?:\\\"[^\\\"]*\\\"|'[^']*'|\\\\.|[^\\s\\\"'\\\\-])(?:\\\"[^\\\"]*\\\"|'[^']*'|\\\\.|[^\\s\\\"'\\\\])*|-{1,2}[^\\s=-][^\\s=]*(?:=(?:\\\"[^\\\"]*\\\"|'[^']*'|\\\\.|[^\\s\\\"'\\\\])*)?))*))\\k<g>\\s+config\\s+(?:--\\w+\\s+)*--list\\b",
