@@ -103,6 +103,15 @@ the rewrite: the agent retries, you aren't asked.
 Both are pattern checks on the command text, so some shapes reach neither (`"env" | grep`,
 `x=$(env)`, `scripts/env` without `./`, `stdbuf /opt/env`), and `bash.allow` exempts either.
 
+An agent that edits a file through the shell (`sed -i`, a `python - <<EOF` script)
+puts the new text in the command, so a test that mentions an attack shape gets asked
+about. The guard can't tell that apart from the real thing, so the fix is instruction
+text. `keel doctor` checks your global CLAUDE.md for a paragraph that mentions the Edit
+or Write tool together with `sed` or heredocs, and counts how many of the guard's
+shell-command asks in the last 7 days were shaped like `sed -i` or a heredoc script
+(heredoc bodies, such as commit messages, aren't read). It is a text match and a count by
+command shape, advisory only; `KEEL_EDIT_CHECK_OFF=1` turns it off.
+
 Those exfiltration rules are why this exists rather than deferring to
 `permissions.deny`. The native deny list matches command *prefixes*, which handles
 `Bash(rm -rf /:*)` perfectly and cannot express "curl with a credential file as its

