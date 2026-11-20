@@ -38,16 +38,12 @@ const RECORDS = readFileSync(join(HERE, "fixtures", "guard-standin.jsonl"), "utf
 // Noise records the current guard still asks on. Each guard PR that cuts
 // noise lowers this to its new exact count; it is never raised. A change that
 // needs it raised is adding interruptions, and has to argue for that instead.
-const NOISE_ASK_CEILING = 23;
+const NOISE_ASK_CEILING = 22;
 
 // Signal the current guard misses, each with what closes it. Known, tracked,
 // and expected to flip: when one starts asking, node:test reports the todo as
 // passing and its entry comes out here.
 const KNOWN_MISSES = new Map([
-  ["sources a secrets file, sends its token with curl -u", "the token-send rule"],
-  ["eval pulls an MCP server's token from ~/.claude.json, curl -u", "the token-send rule"],
-  ["rewrites own remote branch with lease, via git -C", "git global options before push"],
-  ["deletes remote branches with a lease refspec, via git -C", "git global options before push"],
   ["deletes a remote branch with --delete", "a remote-deletion rule"],
   ["live POST to an outside password-forgot endpoint", "a write-to-outside-host rule"],
 ]);
