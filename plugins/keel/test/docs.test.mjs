@@ -253,6 +253,23 @@ test("the technical page lists exactly the commands bin/keel dispatches", () => 
   assert.deepEqual(listed.sort(), dispatched.sort(), "technical.astro CLI line vs bin/keel dispatch");
 });
 
+// The plain pages carry the same list in the same shape; review of #9 found
+// skills.astro a command behind while technical.astro was pinned. Every
+// `<code>keel a · b · …</code>` on any page is checked, so a copy can't hide.
+test("every page that lists keel's commands lists exactly the dispatched ones", () => {
+  const dispatched = [...commands].filter((c) => c !== "help").sort();
+  let lists = 0;
+  for (const f of readdirSync(pagesDir).filter((f) => f.endsWith(".astro"))) {
+    for (const [, line] of readFileSync(join(pagesDir, f), "utf8").matchAll(/<code>keel ([a-z ·\n-]+)<\/code>/g)) {
+      if (!line.includes("·")) continue;
+      lists++;
+      const listed = line.split("·").map((s) => s.trim()).filter(Boolean).sort();
+      assert.deepEqual(listed, dispatched, `${f} command list vs bin/keel dispatch`);
+    }
+  }
+  assert.ok(lists >= 2, `expected the technical and skills pages' lists, found ${lists}`);
+});
+
 test("the install page's off-switch table has every *_OFF key the code reads", () => {
   const sources = [
     join(root, "plugins", "keel", "bin", "keel"),

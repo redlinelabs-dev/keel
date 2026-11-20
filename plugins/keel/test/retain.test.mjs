@@ -314,6 +314,24 @@ describe("keel retain-id --audit names the repair", () => {
     rmSync(w.root, { recursive: true, force: true });
   });
 
+  // A lone non-canonical id, with no duplicate beside it: --audit names the id
+  // to move to, doctor warns, and doctor does not count it as a problem — only
+  // a duplicate is, because only a duplicate lets recall answer from a stale copy.
+  test("a lone non-canonical id is a warning with its canonical form, not a problem", () => {
+    const w = world({ "-proj": ["note.md"] });
+    // world() puts the config dir at <home>/cfg, not <home>/.claude, so build
+    // the home-relative id from where this world's file really is.
+    setDocs([doc("cfg/projects/-proj/memory/note.md")]);
+    const a = keel(w, ["retain-id", "--audit"]).stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    assert.match(a, /id is not canonical[\s\S]*cfg\/projects\/-proj\/memory\/note\.md\s+->\s+projects\/-proj\/memory\/note\.md/);
+    assert.doesNotMatch(a, /stored twice/);
+    const d = keel(w, ["doctor"]);
+    const plain = d.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    assert.match(plain, /1 document id\(s\) are not what keel would derive/);
+    assert.equal(d.status, 0, plain);
+    rmSync(w.root, { recursive: true, force: true });
+  });
+
   // doctor kept "the next retain adds a copy" for ids that have no file to
   // retain from; each kind gets its own line and its own repair.
   test("doctor names unaddressable ids separately from non-canonical ones", () => {
