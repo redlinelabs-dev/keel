@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { mkdtempSync, rmSync, copyFileSync, mkdirSync, writeFileSync, symlinkSync, linkSync } from "node:fs";
+import { mkdtempSync, rmSync, copyFileSync, mkdirSync, writeFileSync, symlinkSync, linkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), "..", "hooks", "security-guard.mjs");
@@ -165,6 +165,16 @@ describe("git global options do not hide the subcommand", () => {
     test(`asks: ${name}`, () => assert.ok(isAsk(bash(cmd)), `should ask: ${cmd}`));
   }
   test("allows: -C before a plain push", () => assert.ok(isAllow(bash("git -C ~/src/app push origin main"))));
+
+  // JSON can't share a constant, so the push and config rules each carry the
+  // option skip. A fix to one that misses the other fails here.
+  test("the push and config rules carry the same option skip", () => {
+    const confirm = JSON.parse(readFileSync(join(dirname(HOOK), "..", "policy", "security.json"), "utf-8")).bash.confirm;
+    const skip = (re) => confirm.find((r) => re.test(r.pattern)).pattern.match(/^\\bgit(\(.*\))\*\\s\+(?:push|config)/)?.[1];
+    const push = skip(/\\s\+push\\b/), config = skip(/\\s\+config\\s/);
+    assert.ok(push, "push rule lost its option skip");
+    assert.equal(config, push);
+  });
 
   // The option skip once read `--force` as `-` + `-force` or `--` + `force`,
   // and that ambiguity per flag backtracked exponentially: 24 long flags took
