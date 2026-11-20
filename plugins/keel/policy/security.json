@@ -48,6 +48,10 @@
       {
         "pattern": "\\bwipefs\\b",
         "reason": "Wipes filesystem signatures from a device"
+      },
+      {
+        "pattern": "(?:(?<=(?:^|[\\s;&|(`])(?:/usr)?(?:/local)?/s?bin/)|(?<![\\w./~$-]))(?:printenv|env)\\s*(?:\\||>|$)",
+        "reason": "Looks like an environment dump: the word env or printenv sits right before |, > or the end of the command. Rewrite and retry: in a search pattern write [e]nv and print[e]nv (process\\.[e]nv, Bun\\.[e]nv, ls | grep -E 'tok|[e]nv'). If the word is in code or text you are writing to a file, write it with the Edit or Write tool, not a shell heredoc. To read one variable, name it: printf '%s\\n' \"$HOME\". Never dump the environment."
       }
     ],
     "confirm": [
@@ -116,8 +120,8 @@
         "reason": "Renders resolved compose config, interpolating every secret from .env into the output"
       },
       {
-        "pattern": "\\b(?:printenv|env)\\s*(?:\\||>|$)",
-        "reason": "Dumps the whole environment, including any secrets in it"
+        "pattern": "(?:(?<=\\b(?:cat|tac|less|more|head|tail|bat|nl|grep|egrep|fgrep|rg|ag|awk|sed|sort|uniq|cut|base64|xxd|od|hexdump|strings|jq|yq|diff|dd|tee|paste|column|fold|rev|tr|show)\\b[^\\n;&|]{0,400}[\\s/'\"=:])|(?<=<\\s{0,8}(?:['\"]?[^\\s;&|<>]{0,400}/|['\"])?))\\.env(?:\\.(?!(?:example|sample|template|dist)\\b)[\\w-]+)?(?=$|[\\s;&|>)'\"])",
+        "reason": "Prints a .env file, whose values land in the transcript sent to the model provider"
       },
       {
         "pattern": "\\bgit(?=(?<g>(?:\\s+(?:(?:-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--attr-source|--shallow-file)\\s+(?:\\\"[^\\\"]*\\\"|'[^']*'|\\\\.|[^\\s\\\"'\\\\-])(?:\\\"[^\\\"]*\\\"|'[^']*'|\\\\.|[^\\s\\\"'\\\\])*|-{1,2}[^\\s=-][^\\s=]*(?:=(?:\\\"[^\\\"]*\\\"|'[^']*'|\\\\.|[^\\s\\\"'\\\\])*)?))*))\\k<g>\\s+config\\s+(?:--\\w+\\s+)*--list\\b",

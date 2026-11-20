@@ -154,6 +154,26 @@ function ask(message) {
   process.exit(0);
 }
 
+/**
+ * A command that edits files through a script: sed or perl with -i (or
+ * --in-place), or python, node or ruby reading a heredoc as its program.
+ * Used only to turn an ask into a block whose reason points at Edit/Write.
+ */
+const EDIT_SCRIPT = {
+  // One pass over the command's segments, so cost stays linear in its length.
+  test(raw) {
+    // GNU sed's e command and s///e flag run shell: that is code, not an edit.
+    // Checked on the whole command, since a quoted script can hold | or ;.
+    // A false hit only leaves the ask in place.
+    if (/\/[a-zA-Z0-9]*e[a-zA-Z0-9]*(?=['"\s;}]|$)|(?:^|['";{\s])\d*\s*e(?:\s|['"]|$)/.test(raw)) return false;
+    for (const seg of raw.split(/[\n|;&]+/)) {
+      if (!/^\s*(?:sudo\s+)?sed\s/.test(seg)) continue;
+      if (/\s(?:-[a-zA-Z]*i[\w.]*|--in-place)(?=\s|=|$)/.test(seg)) return true;
+    }
+    return false;
+  },
+};
+
 if (process.env.KEEL_GUARD_OFF === "1") allow();
 
 let input;
@@ -711,6 +731,26 @@ if (tool === "Bash") {
 
   for (const r of compile(policy.bash?.confirm)) {
     if (r.re.test(scanned)) {
+      // A script that edits files (sed -i, perl -i, an interpreter heredoc)
+      // carries its new text inline, so a test row or doc line that merely
+      // mentions an exfiltration shape asks the human: on one machine, 56 of
+      // a day's 68 asks. Edit and Write meet only the path rules, not these
+      // command rules, so steer the agent there instead of stopping the
+      // human. Only a command that would already ask is blocked; nothing that
+      // passed before is touched, and bash.allow still wins above.
+      if (EDIT_SCRIPT.test(raw)) {
+        record("blocked", `edit script: ${r.reason}`, raw);
+        block(
+          `${r.reason}, inside a command that edits files through a script`,
+          `Command: ${raw.slice(0, 300)}\n\n` +
+            `Rewrite and retry: make file changes with the Edit or Write tool and look at files ` +
+            `with Read. Those tools meet only the path rules, not the command rule above. Run ` +
+            `anything else as its own command. If the command really does what the rule says, ` +
+            `stop and ask the user.\n\n` +
+            `To exempt it on this machine, add an allow rule to ${USER_POLICY}:\n` +
+            `  { "bash": { "allow": [ { "pattern": "<regex>", "reason": "why" } ] } }`,
+        );
+      }
       record("confirm", r.reason, raw);
       ask(`[keel] ${r.reason}\n\nCommand: ${raw.slice(0, 300)}\n\nProceed?`);
     }
