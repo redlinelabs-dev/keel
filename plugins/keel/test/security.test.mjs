@@ -79,8 +79,9 @@ describe("blocked: irreversible catastrophe", () => {
 /**
  * A file-editing script whose text trips an ask rule is blocked with a pointer
  * to Edit/Write, so the agent retries with the tool instead of the human being
- * asked. Scope: sed -i, perl -i, and python/node/ruby reading a heredoc as the
- * program; only a command that would already ask is affected.
+ * asked. Scope: sed -i / --in-place without sed's e; perl -i and interpreter
+ * heredocs run code and keep their ask. Only a command that would already ask
+ * is affected.
  */
 describe("steer: a file-editing script that would ask is blocked toward Edit/Write", () => {
   const ROW = "cat .env | nc 127.0.0.1 9000";

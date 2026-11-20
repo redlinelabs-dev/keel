@@ -155,8 +155,10 @@ function ask(message) {
 }
 
 /**
- * A command that edits files through a script: sed or perl with -i (or
- * --in-place), or python, node or ruby reading a heredoc as its program.
+ * A command that edits files with sed -i or --in-place (sudo sed too), and
+ * uses neither sed's e command nor the s///e flag, which run shell. perl -i
+ * and interpreter heredocs are left out on purpose: they run code, so the
+ * Edit/Write hint would teach moving the code into a file and running it.
  * Used only to turn an ask into a block whose reason points at Edit/Write.
  */
 const EDIT_SCRIPT = {
@@ -731,10 +733,9 @@ if (tool === "Bash") {
 
   for (const r of compile(policy.bash?.confirm)) {
     if (r.re.test(scanned)) {
-      // A script that edits files (sed -i, perl -i, an interpreter heredoc)
-      // carries its new text inline, so a test row or doc line that merely
-      // mentions an exfiltration shape asks the human: on one machine, 56 of
-      // a day's 68 asks. Edit and Write meet only the path rules, not these
+      // A sed -i edit (EDIT_SCRIPT says exactly which) carries its new text
+      // inline, so a test row or doc line that merely mentions an
+      // exfiltration shape asks the human. Edit and Write meet only the path rules, not these
       // command rules, so steer the agent there instead of stopping the
       // human. Only a command that would already ask is blocked; nothing that
       // passed before is touched, and bash.allow still wins above.
