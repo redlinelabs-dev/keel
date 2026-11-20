@@ -95,13 +95,20 @@ test("durable docs describe the system, not its rollout", () => {
 // A cold review (2026-07-30) found the README naming one skill while four
 // shipped, and three version numbers disagreeing — drift the original two
 // checks were too narrow to see. Same disease, wider net.
+// Widened 2026-09-17: it walked one plugin's skills, and the second plugin to
+// ship one (keel-reflect's `retain`) would have gone unmentioned with the test
+// still green — the same drift one directory over.
 test("every skill keel ships is named in the README", () => {
   const readme = readFileSync(join(root, "README.md"), "utf8");
-  for (const skill of readdirSync(join(root, "plugins", "keel", "skills"))) {
-    assert.ok(
-      new RegExp(`\\b${skill}\\b`).test(readme),
-      `README.md never mentions the \`${skill}\` skill — the box says less than it holds`,
-    );
+  for (const plugin of readdirSync(join(root, "plugins"))) {
+    const dir = join(root, "plugins", plugin, "skills");
+    if (!existsSync(dir)) continue;
+    for (const skill of readdirSync(dir)) {
+      assert.ok(
+        new RegExp(`\\b${skill}\\b`).test(readme),
+        `README.md never mentions the \`${skill}\` skill from ${plugin} — the box says less than it holds`,
+      );
+    }
   }
 });
 
@@ -244,6 +251,23 @@ test("the technical page lists exactly the commands bin/keel dispatches", () => 
   const listed = line.split("·").map((s) => s.trim()).filter(Boolean);
   const dispatched = [...commands].filter((c) => c !== "help");
   assert.deepEqual(listed.sort(), dispatched.sort(), "technical.astro CLI line vs bin/keel dispatch");
+});
+
+// The plain pages carry the same list in the same shape; review of #9 found
+// skills.astro a command behind while technical.astro was pinned. Every
+// `<code>keel a · b · …</code>` on any page is checked, so a copy can't hide.
+test("every page that lists keel's commands lists exactly the dispatched ones", () => {
+  const dispatched = [...commands].filter((c) => c !== "help").sort();
+  let lists = 0;
+  for (const f of readdirSync(pagesDir).filter((f) => f.endsWith(".astro"))) {
+    for (const [, line] of readFileSync(join(pagesDir, f), "utf8").matchAll(/<code>keel ([a-z ·\n-]+)<\/code>/g)) {
+      if (!line.includes("·")) continue;
+      lists++;
+      const listed = line.split("·").map((s) => s.trim()).filter(Boolean).sort();
+      assert.deepEqual(listed, dispatched, `${f} command list vs bin/keel dispatch`);
+    }
+  }
+  assert.ok(lists >= 2, `expected the technical and skills pages' lists, found ${lists}`);
 });
 
 test("the install page's off-switch table has every *_OFF key the code reads", () => {
