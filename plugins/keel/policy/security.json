@@ -120,8 +120,8 @@
         "reason": "Renders resolved compose config, interpolating every secret from .env into the output"
       },
       {
-        "pattern": "(?<![\\w./~$\"'-])(?:printenv|env)\\s*(?:\\||>|$)|(?<=[\"'])(?<!\\b(?:e?grep|fgrep|rg|ag|ack)\\b[^\\n;&|'\"]{0,200}[\"'])(?:printenv|env)\\s*(?:\\||>|$)|(?<=[\"'])(?:printenv|env)(?:\\s*>|\\s*$|\\s+\\||\\|(?![^\\s|]))|(?<=\\bbin/)(?:printenv|env)\\s*(?:\\||>|$)",
-        "reason": "May dump the whole environment, including any secrets in it: env or printenv right before |, > or the end, behind a wrapper (ssh, timeout, docker exec, a { } group) or as an argument"
+        "pattern": "(?<![\\w./~$\"'-])(?:printenv|env)\\s*(?:\\||>|$)|(?<=[\"'])(?<!\\b(?:e?grep|fgrep|rg|ag|ack)\\b[^\\n;&|'\"]{0,200}[\"'])(?:printenv|env)\\s*(?:\\||>|$)|(?<=[\"'])(?:printenv|env)(?:\\s*>|\\s*$|\\s+\\||\\|(?![^\\s|]))|(?<=(?:^|[;&|(`\\n{!]|\\$\\(|\\b(?:then|do|else|elif)\\b|\\b(?:sudo|doas|exec|command|nohup|time|timeout|nice|xargs|watch|eval|ssh|busybox)\\b[^\\n;&|]{0,64}?\\s)[ \\t]{0,16}['\"]?(?:/|~/|\\.\\.?/|\\$\\{?\\w{1,64}\\}?/)(?:[^\\s;&|<>'\"/]{0,64}/){0,16})(?:printenv|env)\\s*(?:\\||>|$)|(?<=\\bbin/)(?:printenv|env)\\s*(?:\\||>|$)",
+        "reason": "May dump the whole environment, including any secrets in it: env or printenv right before |, > or the end, behind a wrapper (ssh, timeout, docker exec, a { } group), from a path, or as an argument"
       },
       {
         "pattern": "(?:(?<=\\b(?:cat|tac|less|more|head|tail|bat|nl|grep|egrep|fgrep|rg|ag|awk|sed|sort|uniq|cut|base64|xxd|od|hexdump|strings|diff|dd|tee|paste|column|fold|rev|tr|show|log|blame|sops|perl|ruby|iconv|fmt|pr|expand|look|xargs|vim?|view|nano|emacs)\\b[^\\n;&|]{0,400}[\\s/'\"=:])|(?<=<\\s{0,8}(?:['\"]?[^\\s;&|<>]{0,400}/|['\"])?))\\.env(?:\\.(?!(?:example|sample|template|dist)\\b)[\\w-]+)?(?=$|[\\s;&|>)'\"])",
