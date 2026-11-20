@@ -87,15 +87,11 @@ exfiltration-shaped commands: piping a remote script into a shell, uploading a
 credential file over HTTP, copying an ssh key to a remote host, force pushes,
 publishing local content to a gist.
 
-Two shapes are blocked with a rewrite instead of asked about, because the block's
-reason reaches the agent, which retries, while an ask stops you. An environment dump
-(`env` or `printenv`, bare or from a `bin/` directory, before `|`, `>` or the end of the
-command) is blocked, and the reason shows how to search for the word without dumping
-(`[e]nv`). A command that would ask and edits files through `sed -i` (without sed's `e`,
-which runs shell) is blocked with a pointer to the Edit and Write tools, which meet only
-the path rules. Interpreter heredocs still ask: they run code, and moving code into a file
-wouldn't make it safer. Both are pattern checks on the command text, and `bash.allow`
-exempts either.
+An environment dump (`env` or `printenv`, bare or from a `bin/` directory, before `|`,
+`>` or the end of the command) is blocked with a rewrite instead of asked about: the
+block's reason reaches the agent, which retries, while an ask stops you. The reason shows
+how to search for the word without dumping (`[e]nv`). It is a pattern check on the command
+text, and `bash.allow` exempts it.
 
 Those exfiltration rules are why this exists rather than deferring to
 `permissions.deny`. The native deny list matches command *prefixes*, which handles

