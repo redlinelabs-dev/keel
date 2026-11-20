@@ -20,6 +20,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -89,4 +90,21 @@ test("every test file imports hermetic.mjs before anything else", () => {
     const [first] = readFileSync(join(here, f), "utf8").match(/^import .*$/m) ?? [];
     assert.equal(first, 'import "./hermetic.mjs";', `${f} must import ./hermetic.mjs first`);
   }
+});
+
+// A root keel reads from an env var with a home-directory fallback is a door to
+// the developer's real files; hermetic.mjs must close each one. Found from the
+// code, so a new root fails here instead of on someone's configured machine.
+test("hermetic.mjs isolates every env-redirectable root keel reads", async () => {
+  const { ROOTS } = await import("./hermetic.mjs");
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sources = [join(here, "..", "bin", "keel"),
+    ...readdirSync(join(here, "..", "hooks")).filter((f) => f.endsWith(".mjs")).map((f) => join(here, "..", "hooks", f))];
+  const found = new Set();
+  for (const s of sources) {
+    for (const m of readFileSync(s, "utf8").matchAll(/process\.env\.((?:XDG_\w+_HOME|CLAUDE_CONFIG_DIR))\b/g)) found.add(m[1]);
+  }
+  assert.ok(found.size > 0, "scan found no roots — the pattern is stale");
+  assert.deepEqual([...found].filter((n) => !ROOTS.includes(n)), [], "roots keel reads that hermetic.mjs leaves pointing at the real home");
+  for (const n of ROOTS) assert.ok(process.env[n].startsWith(tmpdir()), `${n} is not a temp dir`);
 });
