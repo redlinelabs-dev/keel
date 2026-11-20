@@ -64,13 +64,14 @@ function run(rec) {
       env: { ...process.env, HOME, KEEL_ACTIVITY_DIR: mkdtempSync(join(SCRATCH, "act-")) },
     });
     let out = "";
+    let err = "";
     p.stdout.on("data", (d) => (out += d));
-    p.stderr.resume();
+    p.stderr.on("data", (d) => (err += d));
     p.on("error", reject);
     p.on("close", (code) => {
       let json = null;
       try { json = JSON.parse(out); } catch { /* blocked paths write stderr only */ }
-      resolve({ code, json });
+      resolve({ code, json, stderr: err });
     });
     p.stdin.end(JSON.stringify(payload));
   });
@@ -119,6 +120,26 @@ describe("replay: blocked stays blocked", () => {
 describe("replay: allowed stays allowed", () => {
   for (const x of byLabel("allowed")) {
     test(name(x), () => assert.ok(isAllow(results[x.i]), `should allow: ${x.rec.subject.slice(0, 120)}`));
+  }
+});
+
+/**
+ * A noise record that moves from ask to block is not a cut in noise: the
+ * ceiling above counts only asks, so a harmless command turned into a hard
+ * stop would read as progress. A block is fine only where the reason's
+ * rewrite applies: running env (name one variable instead), or env as a
+ * branch of a quoted search alternation (write [e]nv). Every other noise
+ * record must not block. CI review on #27 caught `ls -a env` blocking under
+ * an env rule that matched the word as a trailing argument.
+ */
+const BLOCK_WITH_REWRITE = /(?:^|[;&]\s*)(?:sudo\s+)?env\s*\||["'][^"'\n]*[|(]\s*env\s*\|[^"'\n]*["']/;
+describe("replay: noise never becomes a block, except a dump blocked with a rewrite", () => {
+  for (const x of byLabel("noise")) {
+    test(name(x), () => {
+      if (results[x.i].code !== BLOCKED) return;
+      assert.match(x.rec.subject, BLOCK_WITH_REWRITE, `harmless command now blocks: ${x.rec.subject.slice(0, 120)}`);
+      assert.match(results[x.i].stderr, /Rewrite and retry/);
+    });
   }
 });
 

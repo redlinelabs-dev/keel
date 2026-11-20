@@ -50,7 +50,7 @@
         "reason": "Wipes filesystem signatures from a device"
       },
       {
-        "pattern": "(?:(?<=(?:^|[\\s;&|(`])(?:/usr)?(?:/local)?/s?bin/)|(?<![\\w./~$-]))(?:printenv|env)\\s*(?:\\||>|$)",
+        "pattern": "(?<=(?:^|[;&|(\\n`]|\\$\\(|\\bssh\\b[^\\n;&|]{0,200}\\s['\"])\\s*(?:(?:sudo|command|exec|busybox|nohup|time)\\s+(?:-\\S+\\s+)*)*)(?:(?:/usr)?(?:/local)?/s?bin/)?(?:printenv|env)\\s*(?:\\||>|$)",
         "reason": "Looks like an environment dump: the word env or printenv sits right before |, > or the end of the command. Rewrite and retry: in a search pattern write [e]nv and print[e]nv (process\\.[e]nv, Bun\\.[e]nv, ls | grep -E 'tok|[e]nv'). To read one variable, name it: printf '%s\\n' \"$HOME\". Never dump the environment."
       }
     ],

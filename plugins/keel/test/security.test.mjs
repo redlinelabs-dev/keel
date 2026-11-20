@@ -152,7 +152,10 @@ describe("blocked: an environment dump — the block and its rewrites", () => {
     ["env piped onward", "env | grep -i key"],
     ["printenv dump", "printenv"],
     ["env redirected to a file", "env > /tmp/e.txt"],
-    ["env inside a grep alternation", 'grep -rn -E "env|hook" docs/ | head'],
+    ["env as a later branch of a grep alternation", 'grep -rn -E "hook|env|secret" docs/ | head'],
+    ["env after &&", "cd x && env | grep KEY"],
+    ["env in $(...)", "echo $(env | grep KEY)"],
+    ["env over ssh", "ssh host 'env | grep KEY'"],
     ["env by absolute path", "/usr/bin/env | x"],
     ["env by absolute path, bare", "/usr/bin/env"],
     ["env from /bin, redirected", "/bin/env > out"],
@@ -173,7 +176,14 @@ describe("blocked: an environment dump — the block and its rewrites", () => {
     ["print[e]nv as a search word", "ls | grep -E 'tok|print[e]nv'"],
     ["one variable, named", "printf '%s\\n' \"$HOME\""],
     ["env as a command prefix", "env NODE_ENV=test node --test x.test.mjs"],
+    ["env first in a quoted alternation", 'grep -rn -E "env|hook" docs/ | head'],
   ];
+  // env as the argument of another command is a directory (often a Python
+  // virtualenv), not a dump. Blocking it would give a rewrite that can't apply.
+  const args = ["ls -a env", "cd env", "rm -rf env", "mkdir env", "npm run test:env", "ls ~/src/site/env"];
+  for (const cmd of args) {
+    test(`env as an argument is not blocked: ${cmd}`, () => assert.notEqual(bash(cmd).code, BLOCKED));
+  }
   for (const [name, cmd] of rewrites) {
     test(`the rewrite passes: ${name}`, () => assert.ok(isAllow(bash(cmd)), `should allow: ${cmd}`));
   }
