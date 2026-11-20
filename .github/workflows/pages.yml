@@ -1,6 +1,12 @@
 # Deploys site/ to GitHub Pages (keel.redlinelabs.dev).
 # Astro static build — zero client JS in the output; the build step exists
 # for layouts and pages, not for a framework runtime.
+#
+# Build and deploy are separate jobs, as in GitHub's Pages starter workflow.
+# On 2026-11-20 one job uploaded the artifact and deploy-pages, a second
+# later, found "0 artifact(s)"; a re-run passed unchanged. With deploy in its
+# own job it starts after the upload job has finished, and a failed deploy
+# re-runs without rebuilding.
 name: pages
 
 on:
@@ -9,21 +15,21 @@ on:
     paths: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
+# Least privilege per job, as in review.yml (#8): build runs npm ci, which
+# executes dependencies' install scripts, so it gets read only. The Pages and
+# OIDC grants belong to deploy, which runs nothing but deploy-pages.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
+# A deploy in flight finishes; a newer push waits behind it and replaces any
+# run still queued. Cancelling mid-deploy could leave a deployment half made.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,5 +46,16 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
