@@ -1857,11 +1857,17 @@ function hasEditRule(text) {
  * real <<2EOF or <<$X heredoc then has its body read, an overcount for a
  * delimiter agents don't write. A closer written EOF) inside $( ) isn't
  * seen, so that body runs to the end: an undercount.
+ *
+ * Only a << where a command could be counts as an opener: outside quotes,
+ * or inside a $( ) within them ("$(cat <<'EOF'" is the usual commit shape).
+ * So echo "see <<EOF" doesn't swallow the lines after it. Quote state carries
+ * across lines and skips bodies; backticks aren't tracked.
  */
-const HEREDOC_OPEN = /(?<!<)<<(?!<)(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?(?![\d$][^\s;&|<>()'"]*(?:[\s;&|<>()]|$))([^\s;&|<>()'"]+))/g;
+const HEREDOC_AT = /<<(?!<)(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?(?![\d$][^\s;&|<>()'"]*(?:[\s;&|<>()]|$))([^\s;&|<>()'"]+))/y;
 function withoutHeredocBodies(cmd) {
   const out = [];
   const pending = [];
+  const stack = ["cmd"]; // "cmd" (top level or a $( / ( group), "'" or '"'
   for (const line of cmd.split("\n")) {
     if (pending.length) {
       const d = pending[0];
@@ -1869,7 +1875,26 @@ function withoutHeredocBodies(cmd) {
       continue;
     }
     out.push(line);
-    for (const m of line.matchAll(HEREDOC_OPEN)) pending.push({ strip: m[1] === "-", word: m[2] ?? m[3] ?? m[4] });
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      const top = stack[stack.length - 1];
+      if (top === "'") { if (c === "'") stack.pop(); continue; }
+      if (c === "\\") { i++; continue; }
+      if (top === '"') {
+        if (c === '"') stack.pop();
+        else if (c === "$" && line[i + 1] === "(") { stack.push("cmd"); i++; }
+        continue;
+      }
+      if (c === "'" || c === '"') stack.push(c);
+      else if (c === "(") stack.push("cmd");
+      else if (c === ")") { if (stack.length > 1) stack.pop(); }
+      else if (c === "<" && line[i + 1] === "<" && line[i - 1] !== "<") {
+        HEREDOC_AT.lastIndex = i;
+        const m = HEREDOC_AT.exec(line);
+        if (m) { pending.push({ strip: m[1] === "-", word: m[2] ?? m[3] ?? m[4] }); i = HEREDOC_AT.lastIndex - 1; }
+        else i++;
+      }
+    }
   }
   return out.join("\n");
 }

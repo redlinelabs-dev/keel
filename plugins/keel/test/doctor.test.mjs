@@ -284,6 +284,15 @@ describe("doctor audits the edit habit from CLAUDE.md and the guard's own log", 
     assert.match(r.line, /0 of 4 shell-command ask/);
   });
 
+  test("a << inside a quoted string is not an opener, and doesn't hide the next line", () => {
+    const r = run(null, [
+      ["confirm", "echo \"see <<EOF in the diff\"\nsed -i s/a/b/ config.py\nEOF"],
+      ["confirm", "git commit -m \"drop <<LEGACY markers\nand more\" && sed -i s/a/b/ f"],
+      ["confirm", "git commit -m \"$(cat <<'EOF'\nsed -i x\nEOF\n)\""],
+    ]);
+    assert.match(r.line, /2 of 3 shell-command ask/);
+  });
+
   test("an arithmetic shift is not a heredoc opener", () => {
     const r = run(null, [["confirm", "echo $((1<<2))\nsed -i s/a/b/ f"], ["confirm", "echo $((x<<$n))\nsed -i s/a/b/ f"]]);
     assert.match(r.line, /2 of 2 shell-command ask/);
