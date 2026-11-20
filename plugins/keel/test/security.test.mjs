@@ -142,6 +142,28 @@ describe("confirm: remote execution asks only when the pipe supplies the program
 });
 
 /**
+ * git takes global options before its subcommand: `git -C ~/src/app push
+ * --force` is a force-push. The push and config rules wanted the subcommand
+ * right after `git`, so -C, -c, --git-dir and --work-tree walked a force-push,
+ * a remote branch deletion by lease refspec, and a config dump straight past
+ * them. Found while writing the replay stand-in (guard-replay.test.mjs).
+ */
+describe("git global options do not hide the subcommand", () => {
+  const asks = [
+    ["-C before a force-push", "git -C ~/src/app push --force origin main"],
+    ["-C before a lease push", "git -C ~/src/app push --force-with-lease=b:abc1234 origin b"],
+    ["-c before a force-push", "git -c core.askPass=true push -f origin main"],
+    ["--git-dir= before a force-push", "git --git-dir=/srv/app/.git push --force origin main"],
+    ["-C before a config dump", "git -C ~/src/app config --list"],
+    ["--no-pager before a config dump", "git --no-pager config --global --list"],
+  ];
+  for (const [name, cmd] of asks) {
+    test(`asks: ${name}`, () => assert.ok(isAsk(bash(cmd)), `should ask: ${cmd}`));
+  }
+  test("allows: -C before a plain push", () => assert.ok(isAllow(bash("git -C ~/src/app push origin main"))));
+});
+
+/**
  * A flag is a word of its own: `-T` follows whitespace. The upload and
  * exfiltration rules used to match their flags anywhere, so a URL slug was
  * read as curl options: `how-to-rotate-a-token` holds `-t` (the patterns are
