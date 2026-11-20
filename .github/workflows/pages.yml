@@ -15,10 +15,11 @@ on:
     paths: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
+# Least privilege per job, as in review.yml (#8): build runs npm ci, which
+# executes dependencies' install scripts, so it gets read only. The Pages and
+# OIDC grants belong to deploy, which runs nothing but deploy-pages.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # A deploy in flight finishes; a newer push waits behind it and replaces any
 # run still queued. Cancelling mid-deploy could leave a deployment half made.
@@ -49,6 +50,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
