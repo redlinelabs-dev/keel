@@ -1800,8 +1800,215 @@ async function cmdDoctor() {
     }
   }
 
+  editHabitCheck();
+
   console.log(problems ? `\n${c.red(`${problems} problem(s)`)}\n` : `\n${c.green("all good")}\n`);
   process.exit(problems ? 1 : 0);
+}
+
+/**
+ * ── the edit habit ──────────────────────────────────────────────────────────
+ * An agent that edits files through the shell (sed -i, an interpreter heredoc,
+ * cat > file <<EOF) puts the new text into the command, so a test row that
+ * mentions an attack shape makes the guard ask the human. The guard can't
+ * steer this itself: pointing the
+ * agent at Edit/Write would carry the same text past every command rule (the
+ * review of #27). What prevents it is instruction text, and doctor can check
+ * two things about that, both falsifiable:
+ *
+ *   - present: the global CLAUDE.md has a paragraph naming the Edit or Write
+ *     tool and sed or heredocs. A text match. It can't tell whether agents
+ *     follow it, and it reads only CONFIG_DIR/CLAUDE.md, not project files.
+ *   - working: of the guard's shell-command asks in the last 7 days (its own
+ *     security log), how many were sed -i or heredoc scripts, the shapes
+ *     isShellEdit names. A heredoc script may only read; the count says
+ *     what the command looked like, not what it did.
+ *
+ * Advisory: never counted as a problem, since the rule is a preference and
+ * the asks are still asks. KEEL_EDIT_CHECK_OFF=1 turns it off.
+ */
+const EDIT_RULE_SUGGESTION =
+  "**Edit files with the Edit and Write tools, not the shell.** No `sed -i`, no\n" +
+  "`python - <<EOF` or `node <<EOF` scripts that write files, no `cat > file <<EOF`.\n" +
+  "Shell edits are scanned as commands, so test text that mentions attack shapes\n" +
+  "makes keel's guard ask me. Read files with Read, not cat.";
+
+/**
+ * A paragraph with "Edit tool", "Write tool" or "Edit, Write, or Read tools"
+ * (and the like, markdown backticks or bold included) in it, plus sed or
+ * heredoc. A text match: it can't tell a rule from its opposite, and
+ * lowercase "the edit tool" is missed.
+ */
+const TOOL_NAME = "(?<!\\w)[`*_]*(?:Edit|Write|Read)[`*_]*";
+const EDIT_TOOL = new RegExp(
+  `(?<!\\w)[\`*_]*(?:Edit|Write)[\`*_]*(?:\\s*(?:,\\s*(?:and|or)?|and|or|\\/)\\s*${TOOL_NAME})*\\s+tools?\\b`,
+);
+function hasEditRule(text) {
+  return text.split(/\n\s*\n/).some((p) => EDIT_TOOL.test(p) && /\bsed\b|heredoc/i.test(p));
+}
+
+/**
+ * Drop each heredoc's body, keeping its opening line, so text inside a
+ * commit message or PR body is never read as a command. Delimiters: 'quoted'
+ * or "quoted" (any characters), \escaped, or a bare word. A body that never
+ * closes runs to the end: the guard logs the first 400 characters of a
+ * command, so a long commit message loses its closer. A bare word of digits
+ * or a $ isn't an opener, so $((1<<2)) and $((x<<$n)) keep their lines; a
+ * real <<2EOF or <<$X heredoc then has its body read, an overcount for a
+ * delimiter agents don't write. A closer written EOF) inside $( ) isn't
+ * seen, so that body runs to the end: an undercount.
+ *
+ * Only a << where a command could be counts as an opener: outside quotes,
+ * or inside a $( ) within them ("$(cat <<'EOF'" is the usual commit shape).
+ * So echo "see <<EOF" doesn't swallow the lines after it. Quote state carries
+ * across lines and skips bodies; backticks aren't tracked.
+ */
+const HEREDOC_AT = /<<(?!<)(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?(?![\d$][^\s;&|<>()'"]*(?:[\s;&|<>()]|$))([^\s;&|<>()'"]+))/y;
+function withoutHeredocBodies(cmd) {
+  const out = [];
+  const pending = [];
+  const stack = ["cmd"]; // "cmd" (top level or a $( / ( group), "'" or '"'
+  for (const line of cmd.split("\n")) {
+    if (pending.length) {
+      const d = pending[0];
+      if ((d.strip ? line.replace(/^\t+/, "") : line) === d.word) pending.shift();
+      continue;
+    }
+    out.push(line);
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      const top = stack[stack.length - 1];
+      if (top === "'") { if (c === "'") stack.pop(); continue; }
+      if (c === "\\") { i++; continue; }
+      if (top === '"') {
+        if (c === '"') stack.pop();
+        else if (c === "$" && line[i + 1] === "(") { stack.push("cmd"); i++; }
+        continue;
+      }
+      if (c === "'" || c === '"') stack.push(c);
+      else if (c === "(") stack.push("cmd");
+      else if (c === ")") { if (stack.length > 1) stack.pop(); }
+      else if (c === "<" && line[i + 1] === "<" && line[i - 1] !== "<") {
+        HEREDOC_AT.lastIndex = i;
+        const m = HEREDOC_AT.exec(line);
+        if (m) { pending.push({ strip: m[1] === "-", word: m[2] ?? m[3] ?? m[4] }); i = HEREDOC_AT.lastIndex - 1; }
+        else i++;
+      }
+    }
+  }
+  return out.join("\n");
+}
+
+/**
+ * Replace each quoted string with "q", so a sed -i mentioned inside
+ * git commit -m "…" or gh pr create --title "…" isn't read as a command. It
+ * also hides bash -c 'sed -i …': an undercount, which only makes the check
+ * quieter. Run after withoutHeredocBodies, which needs quoted delimiters.
+ */
+function withoutQuoted(cmd) {
+  // A scan, not a regex: an unclosed quote makes a backtracking regex
+  // quadratic. An unclosed quote runs to the end, like an unclosed heredoc:
+  // in a logged subject it means the guard's 400-character cut, not shell.
+  // A stray \' or a comment's don't hides the rest too: an undercount.
+  let out = "";
+  let i = 0;
+  while (i < cmd.length) {
+    const q = cmd[i];
+    if (q !== "'" && q !== '"') { out += q; i++; continue; }
+    let j = i + 1;
+    while (j < cmd.length && cmd[j] !== q) j += q === '"' && cmd[j] === "\\" ? 2 : 1;
+    if (j >= cmd.length) return out + '"q"';
+    out += '"q"';
+    i = j + 1;
+  }
+  return out;
+}
+
+/**
+ * The shapes counted, read with heredoc bodies and quoted strings removed:
+ * sed or perl with -i; python, node, ruby or perl (path-qualified too) taking
+ * its program from a heredoc (single-dash flags and `-` allowed before it, no
+ * script argument; a --long flag is missed); or cat > file <<EOF (either
+ * order) or tee file <<EOF, starting their segment. Not counted: a heredoc
+ * piped onward, captured by $( ) or sent to a /dev/ or & target, a herestring
+ * (<<<), and a heredoc fed as stdin to a named script. The cat and tee check
+ * reads the first command line only, so a cat > file <<EOF after a newline
+ * is missed, and so is cat <<EOF &>f: undercounts, which only make the check
+ * quieter.
+ */
+const SHELL_LEAD = String.raw`(?:^|[\s;&|(])(?:sudo\s+)?(?:\S*\/)?`;
+const HEREDOC = /(?<!<)<<(?!<)-?\s*['"\\]?[^\s;&|<>()]/;
+const IN_PLACE = new RegExp(`${SHELL_LEAD}(?:sed|perl)\\s(?:[^\\n;&|]{0,200}\\s)?(?:-[a-zA-Z]*i[\\w.]*|--in-place)(?=\\s|=|$|"q")`);
+const SCRIPT_DOC = new RegExp(`${SHELL_LEAD}(?:python[0-9.]*|node|ruby|perl)(?:\\s+-[A-Za-z]\\S*)*(?:\\s+-(?:\\s+[^\\s<|;&]+)*)?\\s*${HEREDOC.source}`);
+function isShellEdit(raw) {
+  const cmd = withoutQuoted(withoutHeredocBodies(raw));
+  if (IN_PLACE.test(cmd) || SCRIPT_DOC.test(cmd)) return true;
+  // Redirects to a descriptor (>&2, 2>&1) aren't files, and their & isn't a
+  // separator; drop them before splitting into segments.
+  const first = cmd.split("\n")[0].replace(/\d*>&\s*[\d-]+/g, " ");
+  // Only a cat or tee that starts its segment: `"$(cat <<EOF` starts with
+  // the outer command, and `cat <<EOF | gh …` has no > in cat's segment.
+  for (const seg of first.split(/[|;&]/)) {
+    const m = /^\s*(?:sudo\s+)?(cat|tee)\s(.*)$/.exec(seg);
+    if (!m || !HEREDOC.test(m[2])) continue;
+    const toFile = m[1] === "cat"
+      ? /(?<![0-9&<])>>?\s*(?!\/dev\/)[^\s&]/.test(m[2])
+      : /(?:^|\s)(?!\/dev\/)[^\s<>-]/.test(m[2].split(HEREDOC)[0]);
+    if (toFile) return true;
+  }
+  return false;
+}
+
+function editHabit(now = Date.now()) {
+  let rule = false;
+  try {
+    rule = hasEditRule(readFileSync(join(CONFIG_DIR, "CLAUDE.md"), "utf-8"));
+  } catch { /* no global CLAUDE.md: no rule */ }
+  let asks = 0;
+  let edits = 0;
+  const since = now - 7 * 864e5;
+  const dir = activityDir();
+  let files = [];
+  try {
+    files = readdirSync(dir).filter((f) => /^security-.*\.jsonl$/.test(f));
+  } catch { /* no log yet */ }
+  for (const f of files) {
+    let text = "";
+    try { text = readFileSync(join(dir, f), "utf-8"); } catch { continue; }
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      let r;
+      try { r = JSON.parse(line); } catch { continue; }
+      if (!r || typeof r !== "object") continue;
+      if (r.verdict !== "confirm" || r.tool !== "Bash" || !(Date.parse(r.ts) >= since)) continue;
+      asks++;
+      if (isShellEdit(String(r.subject ?? ""))) edits++;
+    }
+  }
+  return { rule, asks, edits };
+}
+
+function editHabitCheck() {
+  if (keelEnv("KEEL_EDIT_CHECK_OFF") === "1") {
+    console.log(`  ${c.dim("○")} edit habit check off ${c.dim("(KEEL_EDIT_CHECK_OFF=1)")}`);
+    return;
+  }
+  const { rule, asks, edits } = editHabit();
+  const where = join(CONFIG_DIR, "CLAUDE.md").replace(homedir(), "~");
+  const tally = c.dim(`(${edits} of ${asks} shell-command ask(s) in 7 days were shaped like sed -i or a heredoc script)`);
+  const named = "a paragraph naming the Edit/Write tool and sed or heredocs";
+  if (rule && !edits) {
+    console.log(`  ${c.green("✔")} edit habit: ${named} in ${where} ${tally}`);
+  } else if (rule) {
+    console.log(`  ${c.yellow("!")} edit habit: ${named} in ${where}, and those asks continue ${tally}`);
+    console.log(`      ${c.dim("subagents may not see it; repeat it in the briefs you give them, or make it stronger")}`);
+  } else if (edits) {
+    console.log(`  ${c.yellow("!")} edit habit: no paragraph naming the Edit/Write tool and sed or heredocs in ${where} ${tally}`);
+    console.log(`      ${c.dim("sessions load that file; a paragraph like this asks agents to edit with Edit/Write:")}`);
+    for (const l of EDIT_RULE_SUGGESTION.split("\n")) console.log(`      ${l}`);
+  } else {
+    console.log(`  ${c.dim("○")} edit habit: no paragraph naming the Edit/Write tool and sed or heredocs in ${where} ${tally}`);
+  }
 }
 
 /**
