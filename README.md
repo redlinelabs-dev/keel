@@ -14,7 +14,7 @@ The point is leverage, not bulk — a minimal customization of the stock tool th
 a second brain across projects and machines, without keel ever becoming a second
 product you maintain.
 
-> **Status:** v0.8, personal tool built in the open. Issues and PRs welcome and may be
+> **Status:** v0.9, personal tool built in the open. Issues and PRs welcome and may be
 > politely declined. Fork freely; that's what the licence is for.
 
 ---
@@ -86,6 +86,22 @@ system directory, `mkfs`, raw writes to block devices, fork bombs — and asks b
 exfiltration-shaped commands: piping a remote script into a shell, uploading a
 credential file over HTTP, copying an ssh key to a remote host, force pushes,
 publishing local content to a gist.
+
+An environment dump is blocked with a rewrite instead of asked about: the block's reason
+reaches the agent, which retries, while an ask stops you. The block needs `env` or
+`printenv` where a command starts (the line's start, after `;`, `&`, `|`, `(`, a backtick
+or `$(`, or opening an `ssh` command's quoted string; optionally behind `sudo`, `command`,
+`exec`, `busybox`, `nohup` or `time` with bare flags, or from `/bin`, `/sbin` or their
+`/usr` and `/usr/local` forms), right before `|`, `>` or the end. The reason
+shows how to search for the word without dumping (`[e]nv`). Outside command position the
+same words ask instead (behind `ssh`, `timeout` or `docker exec`, in a `{ }` group, run
+from a path such as `/opt/env` or `./env`, or as a bare argument), except a quoted pattern
+that opens with `env|`, of a `grep`, `rg`, `ag` or `ack` that starts the command
+(`grep -E "env|hook"`), and a path to a directory named `env` given as an argument
+(`ls apps/env`). A quoted `|` reads as a command start, so `"hook|env|secret"` blocks with
+the rewrite: the agent retries, you aren't asked.
+Both are pattern checks on the command text, so some shapes reach neither (`"env" | grep`,
+`x=$(env)`, `scripts/env` without `./`, `stdbuf /opt/env`), and `bash.allow` exempts either.
 
 Those exfiltration rules are why this exists rather than deferring to
 `permissions.deny`. The native deny list matches command *prefixes*, which handles
