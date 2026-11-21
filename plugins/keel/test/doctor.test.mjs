@@ -188,6 +188,20 @@ describe("doctor audits the edit habit from CLAUDE.md and the guard's own log", 
     assert.match(r.stdout, /Edit files with the Edit and Write tools/);
   });
 
+  test("the paragraph doctor prints, pasted as-is, turns the check green", () => {
+    const lines = run(null, [["confirm", SED]]).stdout.split("\n");
+    const at = lines.findIndex((l) => /a paragraph like this/.test(l));
+    assert.ok(at >= 0, "no suggestion printed");
+    const pasted = [];
+    for (const l of lines.slice(at + 1)) {
+      if (!l.startsWith("      ")) break;
+      pasted.push(l.slice(6));
+    }
+    assert.ok(pasted.length > 1, "suggestion is empty");
+    const r = run(`# Working rules\n\n${pasted.join("\n")}\n`, [["confirm", "git push --force"]]);
+    assert.match(r.line, /✔.* edit habit: a paragraph/, r.stdout);
+  });
+
   test("rule present, no shell edits -> green", () => {
     const r = run(RULE, [["confirm", "git push --force"]]);
     assert.match(r.line, /✔.* edit habit: a paragraph/);
