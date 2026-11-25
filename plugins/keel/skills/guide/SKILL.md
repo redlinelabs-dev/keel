@@ -30,7 +30,8 @@ machine may be behind; `keel update` is the fix, not improvisation.
 Three layers, one direction of trust:
 
 - **Hooks capture** — guards at the ingest boundary, the activity log, query
-  recall from your memory files. Deterministic, no model calls, fail toward
+  recall from your memory files, and the session label on a herdr-core
+  terminal that `keel resume` reads after a reboot. Deterministic, no model calls, fail toward
   not breaking your session.
 - **The CLI computes** — `keel status`, `keel log`, setup and repair verbs.
   Read-mostly; Claude usually runs it for you.

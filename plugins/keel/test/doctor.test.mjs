@@ -22,6 +22,8 @@ import { dirname, join } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const KEEL = join(HERE, "..", "bin", "keel");
 const RECALL_HOOK = join(HERE, "..", "hooks", "memory-recall.mjs");
+// bin/keel imports this from ../hooks, so a copy of the CLI needs it beside it.
+const HC_CORE = join(HERE, "..", "hooks", "hc-core.mjs");
 
 /**
  * A temp world: config dir with the memory adapter wired, stub CLIs on PATH.
@@ -389,6 +391,7 @@ describe("doctor runs the recall hook instead of assuming it", () => {
     mkdirSync(bin, { recursive: true });
     mkdirSync(join(w.root, "broken", "hooks"));
     copyFileSync(KEEL, join(bin, "keel"));
+    copyFileSync(HC_CORE, join(w.root, "broken", "hooks", "hc-core.mjs"));
     writeFileSync(join(w.root, "broken", "hooks", "memory-recall.mjs"), "throw new ReferenceError('nope is not defined');\n");
     const r = spawnSync(process.execPath, [join(bin, "keel"), "doctor"], {
       encoding: "utf-8",
@@ -433,6 +436,7 @@ describe("doctor checks which keel is running", () => {
       // them. A copy without them is a broken install, which is its own test.
       mkdirSync(join(cache, v, "hooks"));
       copyFileSync(RECALL_HOOK, join(cache, v, "hooks", "memory-recall.mjs"));
+      copyFileSync(HC_CORE, join(cache, v, "hooks", "hc-core.mjs"));
     }
     writeFileSync(
       join(w.cfg, "plugins", "installed_plugins.json"),

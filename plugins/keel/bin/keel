@@ -24,15 +24,17 @@
  *   keel update     pull the latest keel and any installed bridge plugins
  *   keel migrate    restore marketplaces + plugins from a config a reset moved aside
  *   keel link       put keel on your PATH, via a shim that can't go stale
+ *   keel resume     put Claude back into herdr-core panes a reboot emptied
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, copyFileSync, readdirSync, readlinkSync, symlinkSync, unlinkSync, renameSync, statSync, lstatSync, chmodSync } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, copyFileSync, readdirSync, readlinkSync, symlinkSync, linkSync, unlinkSync, renameSync, statSync, lstatSync, chmodSync } from "node:fs";
+import { homedir, hostname, tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { RESUME_SESSION, RESUME_CWD, coreRunning } from "../hooks/hc-core.mjs";
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), ".claude");
 const SETTINGS = join(CONFIG_DIR, "settings.json");
@@ -1600,6 +1602,64 @@ async function cmdDoctor() {
   }
 
   /**
+   * The herdr-session hook fails silent, and its failure only shows on the day
+   * a machine reboots: every pane comes back a bare shell and nothing says
+   * which conversation was in it. So look now. A Claude pane — herdr-core
+   * reports the app, and the foreground program isn't a shell — with no
+   * usable claude.session label is one `keel resume` can't bring back. That
+   * includes panes whose root program is Claude: herdr-app launches agents
+   * that way, and the hook labels them like any other.
+   *
+   * Only when a core is already running (coreRunning): asking hc would
+   * start one.
+   *
+   * A warning, not a problem: panes whose Claude started before this hook was
+   * installed are unlabelled until Claude next starts in them, and that is not
+   * a broken machine.
+   *
+   * The hook needs a POSIX `ps` to find which Claude ran it. Where there is
+   * none it can never label, and a warning about every pane, forever, with a
+   * fix that can't work, is noise doctor would teach you to skip — so that
+   * case is reported once, with its reason.
+   */
+  {
+    const off = keelEnv("KEEL_HERDR_OFF") === "1";
+    const all = off || !coreRunning() ? null : hcTerminals();
+    const terms = all?.filter((t) => !t.unreadable) ?? null;
+    const unread = all?.filter((t) => t.unreadable).map((t) => oneLine(t.address)) ?? [];
+    if (unread.length) {
+      console.log(`  ${c.yellow("!")} herdr-core couldn't describe ${unread.join(", ")}; not checked for a session label`);
+    }
+    if (off) {
+      console.log(`  ${c.dim("○")} herdr session labels off ${c.dim("(KEEL_HERDR_OFF=1)")}`);
+    } else if (terms) {
+      const ps = process.platform === "win32" ? null : spawnSync("ps", ["-o", "ppid=,comm=", "-p", String(process.pid)], { encoding: "utf-8", timeout: 5000 });
+      const claude = terms.filter((t) =>
+        t.status?.app === "claude-code" && t.foreground && !ANY_SHELL.has(baseName(t.foreground.name)));
+      const labelled = (t) => {
+        const s = t.labels?.["claude.session"], cwd = t.labels?.["claude.cwd"];
+        return Boolean(s && RESUME_SESSION.test(s) && (!cwd || RESUME_CWD.test(cwd)));
+      };
+      const bare = claude.filter((t) => !labelled(t));
+      if (!ps || ps.error || ps.status !== 0 || !ps.stdout.trim()) {
+        console.log(`  ${c.dim("○")} herdr session labels can't work here ${c.dim("(the hook needs a POSIX ps to tell which Claude ran it)")}`);
+      } else if (!bare.length) {
+        console.log(`  ${c.green("✔")} herdr-core panes ${c.dim(`${claude.length} Claude session(s), each labelled for keel resume`)}`);
+      } else {
+        console.log(`  ${c.yellow("!")} ${bare.length} of ${claude.length} Claude pane(s) in herdr-core carry no usable session label`);
+        console.log(`      ${bare.map((t) => oneLine(`${t.address} ${t.labels?.where ?? ""}`.trim())).join(", ")}`);
+        console.log(`      ${c.dim("after a reboot keel resume can't tell which conversation was there")}`);
+        console.log(`      ${c.dim("started before keel had the hook? they're labelled when Claude next starts there")}`);
+        console.log(`      ${c.dim("a wrapper that stays running around claude (npx, op run) or around node (some version-manager")}`);
+        console.log(`      ${c.dim("shims) hides which Claude ran the hook, so it doesn't label; start claude directly, or set")}`);
+        console.log(`      ${c.dim("KEEL_HERDR_OFF=1 to stop this check")}`);
+        console.log(`      ${c.dim("a folder whose path has anything but letters, digits and . _ / space + @ , : = ~ ( ) - is never")}`);
+        console.log(`      ${c.dim("labelled, by design")}`);
+      }
+    }
+  }
+
+  /**
    * Which keel is actually running, and what the PATH entry resolves to.
    *
    * doctor reported "all good" on a machine whose CLI was fourteen commits
@@ -2825,6 +2885,409 @@ async function cmdMigrate(argv) {
   return failed > 0 ? 1 : 0;
 }
 
+// ── resume ──────────────────────────────────────────────────────────────────
+
+/**
+ * herdr-core terminals, through its documented CLI (`hc ls`, `hc get`).
+ *
+ * Returns null when hc isn't here or doesn't answer, so callers can tell "no
+ * herdr-core" from "no terminals". Live terminals only: a finished one has no
+ * shell to type into.
+ */
+function hcJson(args) {
+  const r = spawnSync("hc", [...args, "--json"], { encoding: "utf-8", timeout: 10000 });
+  if (r.error || r.status !== 0) return null;
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every live terminal as `hc get` describes it; null if hc doesn't answer.
+ * One whose `get` fails comes back as `{ address, unreadable: true }`: resume
+ * can't rule out that it holds a session it is about to resume elsewhere.
+ */
+function hcTerminals() {
+  const list = hcJson(["ls"]);
+  if (!Array.isArray(list?.terminals)) return null;
+  return list.terminals
+    .filter((t) => t.state === "live")
+    .map((t) => hcJson(["get", t.address]) ?? { address: t.address, unreadable: true });
+}
+
+// RESUME_SESSION / RESUME_CWD (the label allowlist) and coreRunning (is a
+// core up, without starting one) come from hooks/hc-core.mjs, shared with the
+// herdr-session hook. `keel resume` doesn't ask coreRunning: starting the core
+// is what brings the lost terminals back.
+
+/**
+ * A shell younger than this isn't typed into. A recovered terminal's shell is
+ * its own foreground with no app from the moment it exists — while it is
+ * still running .zshrc. A cold review pressed Ctrl+C into one doing that
+ * (2026-11-24): the rest of the rc never ran, so `mise activate`, which puts
+ * claude on PATH here, would not have. hc reports no prompt and no cursor, so
+ * age is the evidence: an rc that stays silent for longer than this still
+ * gets cut. hc's own keys and send also wait for ~3s without output.
+ */
+const SHELL_SETTLE_S = 10;
+
+/**
+ * What runs under a shell, from `ps`: its age in seconds, and the first child
+ * that is stopped (`T` in ps's STAT) or in the foreground process group
+ * (`+`) of the shell's own terminal — `+` alone is per-tty, and init's getty
+ * children carry it for their consoles. Null when ps can't say.
+ *
+ * hc's `foreground` is the foreground process group's leader, so it misses
+ * two things a cold review raised (2026-11-24): with job control off
+ * (`set +m`) a running program shares the shell's group, and hc reports the
+ * shell; and a Claude suspended with Ctrl+Z leaves the shell in front, still
+ * labelled, with the session alive in a stopped job. A child marked `+` or
+ * `T` catches both. A background job (`cmd &`, a prompt's helper daemon) has
+ * neither mark and doesn't block.
+ */
+function shellProcesses(pid) {
+  const opts = { encoding: "utf-8", timeout: 5000 };
+  const self = spawnSync("ps", ["-o", "etime=,tty=", "-p", String(pid)], opts);
+  const m = !self.error && self.status === 0 ? self.stdout.trim().match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)\s+(\S+)$/) : null;
+  const all = spawnSync("ps", ["-A", "-o", "ppid=,tty=,stat=,comm="], opts);
+  if (!m || all.error || all.status !== 0) return null;
+  const [, d = 0, h = 0, min, s, tty] = m;
+  const age = ((Number(d) * 24 + Number(h)) * 60 + Number(min)) * 60 + Number(s);
+  const children = all.stdout.split("\n").map((l) => l.trim().split(/\s+/)).filter(([ppid]) => Number(ppid) === pid);
+  const held = children.find(([, ctty, stat = ""]) => stat.includes("T") || (stat.includes("+") && ctty === tty));
+  return { age, held: held ? { stopped: held[2].includes("T"), name: held.slice(3).join(" ") } : null };
+}
+
+/**
+ * Shells resume types into: `cd '…' && claude …` parses in each, and Ctrl+C at
+ * their prompt abandons the line. For nu and PowerShell (`&&` is a parse
+ * error in nu and in Windows PowerShell 5.1) it prints the two commands.
+ */
+const RESUME_SHELLS = new Set(["sh", "bash", "dash", "zsh", "fish", "ksh", "mksh", "ash"]);
+const ANY_SHELL = new Set([...RESUME_SHELLS, "busybox", "nu", "pwsh", "powershell", "elvish", "xonsh", "tcsh", "csh"]);
+const baseName = (p) => String(p ?? "").split("/").pop().replace(/^-/, "");
+
+/** A label or program name from the core, on one line with no escape sequences, so it can't fake output. */
+const oneLine = (s) => printable(s).replace(/\p{Cf}/gu, "").replace(/\s+/g, " ");
+
+/**
+ * Whether a terminal's shell is its foreground program, as positive evidence
+ * rather than inference: its root program is a shell, the foreground program
+ * is that same process, and the core reports no agent in it. A terminal
+ * created with `hc run claude` has Claude as its root and foreground — pid
+ * equality alone would read that as a shell and type into a working agent. A
+ * recovered terminal passes: herdr-core replaces a lost program with a fresh
+ * shell as the new root, and a terminal that held Claude comes back with no
+ * `status.app` (both seen 2026-11-24 on an isolated core).
+ *
+ * This is process-level. A shell at a continuation prompt or in `read` also
+ * passes, which is why resume presses Ctrl+C before it types, and so does a
+ * shell still running its rc file, which is why resumeStep also wants it
+ * SHELL_SETTLE_S old, with nothing in front of it or stopped under it
+ * (shellProcesses).
+ */
+function atBareShell(t) {
+  const fg = t.foreground;
+  return Boolean(
+    fg && Number.isInteger(t.pid) && fg.pid === t.pid &&
+    ANY_SHELL.has(baseName(fg.name)) && ANY_SHELL.has(baseName(t.argv?.[0])) &&
+    !t.status?.app,
+  );
+}
+
+/**
+ * What `keel resume` would do with one labelled terminal: null when it has no
+ * label, otherwise one of ready (with the command), manual (a shell resume
+ * doesn't type into — the command is printed instead), busy, or bad.
+ */
+function resumeStep(t) {
+  const session = t.labels?.["claude.session"];
+  if (!session) return null;
+  const where = oneLine(t.labels?.where ?? t.cwd ?? "");
+  const cwd = t.labels?.["claude.cwd"] ?? "";
+  const base = { address: t.address, where, session };
+  if (!RESUME_SESSION.test(session) || (cwd && !RESUME_CWD.test(cwd))) return { ...base, kind: "bad" };
+  // `hc ls` lists connected machines' terminals too, as `machine/t7`. Their
+  // pids are that machine's, so this one's ps can't vouch for their shells.
+  if (String(t.address).includes("/")) {
+    return { ...base, kind: "busy", why: "on another machine; run keel resume there" };
+  }
+  if (!atBareShell(t)) {
+    const fg = t.foreground;
+    // Right after a core start a kept terminal reports no pid for a moment
+    // while its new shell comes up (about 0.6s, seen 2026-11-24).
+    const why = !Number.isInteger(t.pid) ? "still coming back; run keel resume again in a moment"
+      : fg && ANY_SHELL.has(baseName(fg.name)) && fg.pid === t.pid && t.status?.app ? `herdr-core reports ${oneLine(t.status.app)} there, left alone`
+      : `${oneLine(fg?.name ?? "a program")} is running there, left alone`;
+    return { ...base, kind: "busy", why };
+  }
+  const procs = shellProcesses(t.pid);
+  const held = procs?.held;
+  if (!procs || held || procs.age < SHELL_SETTLE_S) {
+    const why = !procs ? "can't tell what its shell is running (no ps), left alone"
+      : held?.stopped ? `a stopped job (${oneLine(held.name)}) is under its shell, left alone`
+      : held ? `${oneLine(held.name)} is running in front of its shell, left alone`
+      : `its shell started ${procs.age}s ago and may still be loading its startup files; run keel resume again in a few seconds`;
+    return { ...base, kind: "busy", why };
+  }
+  // `claude --resume <id>` looks the session up under the folder it runs in.
+  const here = t.foreground.cwd ?? t.cwd;
+  const cd = cwd && cwd !== here ? `cd '${cwd}'` : "";
+  const resume = `claude --resume ${session}`;
+  const command = cd ? `${cd} && ${resume}` : resume;
+  return { ...base, kind: RESUME_SHELLS.has(baseName(t.foreground.name)) ? "ready" : "manual", cd, resume, command };
+}
+
+/**
+ * One `keel resume` typing at a time. Two at once both see the same bare
+ * shell, and the second one's re-check can pass before the first one's claude
+ * has started, so its command lands in that Claude as a prompt.
+ *
+ * The lock is a file holding the holder's pid. It is created whole — the pid
+ * goes into a temp file named with this run's pid (`<lock>.<pid>`) that is then
+ * hard-linked into place, which fails if the lock exists — so no reader ever
+ * sees it empty. A run that exits normally removes both; one killed by a
+ * signal leaves them. A lock whose pid is gone is taken over by renaming a
+ * fresh one onto it. A pid that has since been reused by another program
+ * reads as alive, and blocks resume until the file is removed or the machine
+ * restarts; the message names the file. Two runs can do that in the same
+ * instant and the last rename wins, so every run checks the lock still holds
+ * its own pid before each Ctrl+C and each send (holdsResumeLock), and the
+ * runs that lost stop there. The read-then-rename isn't atomic, so a run
+ * stalled between the two (SIGSTOP, heavy swap) for longer than another run
+ * takes to type can still rename over a live lock; round six's stress runs
+ * didn't hit it. A cold review raced
+ * eight runs over a stale lock (2026-11-24) and two typed into one pane; that
+ * was the version without those checks. On exit a run removes the lock only
+ * if it still holds it.
+ */
+const RESUME_LOCK = () =>
+  join(process.env.XDG_RUNTIME_DIR || tmpdir(), `keel-resume-${process.getuid?.() ?? "user"}.lock`);
+
+function holdsResumeLock() {
+  try {
+    return readFileSync(RESUME_LOCK(), "utf-8") === String(process.pid);
+  } catch {
+    return false;
+  }
+}
+
+/** Takes the lock; null once held, or why it couldn't be. */
+function takeResumeLock() {
+  const path = RESUME_LOCK();
+  const mine = `${path}.${process.pid}`;
+  const release = () => {
+    try { unlinkSync(mine); } catch { /* already gone */ }
+    if (holdsResumeLock()) try { unlinkSync(path); } catch { /* already gone */ }
+  };
+  try {
+    writeFileSync(mine, String(process.pid));
+  } catch (e) {
+    return `can't write next to the lock ${path} (${e.code})`;
+  }
+  // No signal handlers, on purpose: the typing loop is all spawnSync, so a
+  // handler would only run after every pane was typed, and Ctrl+C would stop
+  // nothing (round six, 2026-11-25). A signal kills the run at once and leaves
+  // the lock; its pid is then dead, and the next run takes it over.
+  process.on("exit", release);
+  for (let tries = 0; tries < 5; tries++) {
+    try {
+      linkSync(mine, path);
+      unlinkSync(mine);
+      return null;
+    } catch (e) {
+      if (e.code !== "EEXIST") return `can't take the lock ${path} (${e.code})`;
+    }
+    let holder;
+    try {
+      holder = Number(readFileSync(path, "utf-8"));
+    } catch {
+      continue; // its holder just let go; try again
+    }
+    let alive = false;
+    try {
+      alive = Number.isInteger(holder) && holder > 0 && process.kill(holder, 0);
+    } catch (e) {
+      alive = e.code === "EPERM";
+    }
+    if (alive) return `another keel resume (pid ${holder}) is running; if it isn't, remove ${path}`;
+    try {
+      renameSync(mine, path);
+      return null;
+    } catch {
+      continue;
+    }
+  }
+  return `couldn't take the lock ${path}`;
+}
+
+/** A send with no draft in the way landed in ~0.2s; hc's quiet pause is ~3s. */
+const SEND_CAP_MS = 6000;
+
+/**
+ * One session, one pane. A label outlives a Claude that ended any way but
+ * /exit (a crash, a kill, a core too slow for the end hook), and `claude -r`
+ * of that session elsewhere labels a second pane with it. Resuming either then
+ * runs two Claudes on one transcript. So a session labelled on more than one
+ * pane is resumed in none of them; which one is meant is yours to say. A pane
+ * hc couldn't describe might be that other pane, so while there is one,
+ * nothing is resumed. cmdResume re-runs this whole plan before each pane, not
+ * only when it lists them.
+ */
+function resumePlan(terms) {
+  const unreadable = terms.filter((t) => t.unreadable).map((t) => oneLine(t.address));
+  const steps = terms.filter((t) => !t.unreadable).map(resumeStep).filter(Boolean).map((s, _, all) => {
+    if (s.kind !== "ready" && s.kind !== "manual") return s;
+    if (unreadable.length) {
+      return { ...s, kind: "busy", why: `herdr-core couldn't describe ${unreadable.join(", ")}, which might hold this session; run keel resume again` };
+    }
+    const others = all.filter((o) => o !== s && o.session === s.session).map((o) => oneLine(o.address));
+    if (!others.length) return s;
+    return { ...s, kind: "busy", why: `the same session is labelled on ${others.join(", ")}; left alone, resume it in one pane yourself` };
+  });
+  const of = (kind) => steps.filter((s) => s.kind === kind);
+  return { ready: of("ready"), manual: of("manual"), busy: of("busy"), bad: of("bad") };
+}
+
+/**
+ * keel resume — put Claude back into the herdr-core panes a reboot emptied.
+ *
+ * The herdr-session hook labels each terminal with the session running in it;
+ * after a loss the terminal is a bare shell that still carries the label. This
+ * reads the labels, shows the plan, and on yes types the resume command into
+ * each shell with `hc send`. Apart from its lock file (takeResumeLock) nothing
+ * else is written, and there is no backup to take: the undo is the pane
+ * itself, /exit or Ctrl+C.
+ *
+ * It never appends to a line it didn't write, and never waits on someone's
+ * draft.
+ * `hc send` holds while someone's draft is less than 60s old, then pastes
+ * onto it: on 2026-11-24 a stale `echo DRAFT` plus a send ran as
+ * `echo DRAFTecho LATE`, and a client-side HC_DRAFT_MS changed nothing. So
+ * each pane gets Ctrl+C first — at an sh-family or fish prompt that abandons
+ * the line, stale or fresh — then a fresh look, then a send capped at a few
+ * seconds. A send still held at the cap is killed, and killing a held send
+ * cancels it before it types (measured the same day). The cost: an unsent
+ * line in a pane being resumed is dropped; it stays visible above the new
+ * prompt.
+ */
+async function cmdResume(argv) {
+  const flags = parseFlags(argv);
+  const dry = Boolean(flags["dry-run"]);
+  console.log(`\n${c.bold("keel resume")} — Claude sessions back into herdr-core panes\n`);
+
+  if (!dry) {
+    const other = takeResumeLock();
+    if (other) {
+      console.log(`  ${c.yellow("!")} ${other}; nothing sent\n`);
+      return 1;
+    }
+  }
+
+  const terms = hcTerminals();
+  if (!terms) {
+    console.log(`  ${c.red("✖")} herdr-core's \`hc\` isn't on PATH or isn't answering`);
+    console.log(`      ${c.dim("keel resume works on herdr-core terminals; check with: hc server status")}\n`);
+    return 1;
+  }
+  const { ready, manual, busy, bad } = resumePlan(terms);
+  const at = (s) => `${oneLine(s.address)}  ${s.where}`;
+  for (const b of busy) console.log(`  ${c.dim(`○ ${at(b)}  — ${b.why}`)}`);
+  for (const b of bad) console.log(`  ${c.yellow("!")} ${at(b)}  — label isn't a session id and a plain folder; skipped`);
+  for (const m of manual) {
+    console.log(`  ${c.yellow("!")} ${at(m)}  — not a shell keel types into; run it there yourself:`);
+    if (m.cd) console.log(`      ${m.cd}`);
+    console.log(`      ${m.resume}`);
+  }
+  if (!ready.length) {
+    if (!manual.length) console.log(`  ${c.green("✔")} no pane is waiting for its session`);
+    console.log("");
+    return 0;
+  }
+  for (const r of ready) console.log(`  ${c.bold(oneLine(r.address))}  ${r.where}\n      ${c.dim(r.command)}`);
+  console.log("");
+
+  if (dry) return 0;
+  if (!flags["yes"]) {
+    if (!stdin.isTTY) {
+      console.log(`  ${c.dim("not a terminal — rerun with --yes to send these")}\n`);
+      return 0;
+    }
+    const rl = createInterface({ input: stdin, output: stdout });
+    const answer = await ask1(rl, `  resume ${ready.length} pane(s)? [Y/n] `);
+    rl.close();
+    if (answer === null || /^n/i.test(answer.trim())) {
+      console.log(`  ${c.dim("nothing sent")}\n`);
+      return 0;
+    }
+  }
+
+  // Sent from inside an hc terminal, `hc send` wraps the text in an
+  // <hc from="t2">…</hc> note meant for an agent, and a shell reads that as a
+  // parse error — the first live run typed exactly that. Without the sender's
+  // terminal id the text arrives as typed.
+  const { HC_TERMINAL_ID: _sender, ...sendEnv } = process.env;
+  let failed = 0;
+  // The plan may be minutes old (the question above waits for you), so each
+  // step looks again: a pane where you've since started an editor, or whose
+  // label changed after you said yes, gets nothing. A window remains: a
+  // program started after the last look, before hc pastes (up to the send
+  // cap if hc holds it), still gets the text. `hc send` has no condition on
+  // the foreground program to close it with.
+  // The whole plan, not just this pane: a session reopened in another pane
+  // meanwhile makes this one a duplicate.
+  // Null when the pane still gets exactly this command, otherwise why not.
+  const changed = (r) => {
+    const now = hcTerminals();
+    if (!now) return "herdr-core stopped answering";
+    const plan = resumePlan(now);
+    if (plan.ready.find((s) => s.address === r.address)?.command === r.command) return null;
+    const step = Object.values(plan).flat().find((s) => s.address === r.address);
+    return step?.why ? `changed since the list above: ${step.why}` : "changed since the list above, left alone";
+  };
+  const hc = (args, timeout) => spawnSync("hc", args, { encoding: "utf-8", timeout, env: sendEnv });
+  const lost = () => {
+    if (holdsResumeLock()) return false;
+    failed++;
+    console.log(`  ${c.red("✖")} another keel resume took the lock; stopped here`);
+    return true;
+  };
+  for (const r of ready) {
+    if (lost()) break;
+    let why = changed(r);
+    if (why) {
+      console.log(`  ${c.dim(`○ ${at(r)}  — ${why}`)}`);
+      continue;
+    }
+    const k = hc(["keys", r.address, "ctrl+c"], 15000);
+    if (k.error || k.status !== 0) {
+      failed++;
+      console.log(`  ${c.red("✖")} ${at(r)} — couldn't clear its command line; nothing typed. Run it there yourself: ${r.command}`);
+      continue;
+    }
+    why = changed(r);
+    if (why) {
+      console.log(`  ${c.dim(`○ ${at(r)}  — ${why}`)}`);
+      continue;
+    }
+    if (lost()) break;
+    const s = hc(["send", r.address, r.command], SEND_CAP_MS);
+    if (!s.error && s.status === 0) {
+      console.log(`  ${c.green("✔")} ${at(r)}`);
+    } else if (s.error?.code === "ETIMEDOUT") {
+      failed++;
+      console.log(`  ${c.red("✖")} ${at(r)} — hc held the send, as it does while someone types there; cancelled. Run it there yourself: ${r.command}`);
+    } else {
+      failed++;
+      console.log(`  ${c.red("✖")} ${at(r)} — hc send failed; check the pane, then type it yourself if it isn't there: ${r.command}`);
+    }
+  }
+  console.log("");
+  return failed ? 1 : 0;
+}
+
 /**
  * Ctrl+D at a prompt means "stop", not "crash".
  *
@@ -2869,6 +3332,8 @@ switch (cmd) {
     process.exit(await cmdMigrate(process.argv.slice(3)));
   case "link":
     process.exit(cmdLink(process.argv.slice(3)));
+  case "resume":
+    process.exit(await cmdResume(process.argv.slice(3)));
   default:
     console.log(`
 ${c.bold("keel")} — configures third-party memory backends for Claude Code
@@ -2885,6 +3350,7 @@ ${c.bold("keel")} — configures third-party memory backends for Claude Code
   keel migrate   restore marketplaces + plugins from a config a reset moved aside
                  ${c.dim("--all | --pick | --none, --from DIR, --dry-run")}
   keel link      put keel on your PATH  ${c.dim("--dir DIR (default ~/.local/bin)")}
+  keel resume    Claude back into herdr-core panes after a reboot  ${c.dim("--yes | --dry-run")}
 
 keel owns no runtime. It configures other people's tools and gets out of the way.
 `);
