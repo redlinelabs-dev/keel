@@ -114,6 +114,59 @@ import Base from "../layouts/Base.astro";
         </div>
 
         <div class="spec">
+          <h3 id="herdr">session resume in herdr-core</h3>
+          <p>herdr-core brings a kept terminal back as a bare shell after it loses
+          it, and never re-runs the program. Inside an hc terminal, a
+          <code>SessionStart</code> hook labels it with the documented
+          <code>session_id</code> and <code>cwd</code>, through <code>hc label</code>.
+          It labels only when the nearest non-shell ancestor of the hook, read with
+          <code>ps</code>, is the terminal's foreground pid as <code>hc get</code>
+          reports it, so a nested <code>claude -p</code> doesn't overwrite it. That
+          ancestry is observed, not documented, and has a row on the
+          <a href="https://github.com/redlinelabs-dev/keel/blob/main/docs/DOCUMENTED-SURFACES.md">surfaces
+          page</a>. Values are allowlisted (an id; an absolute path of Unicode
+          letters, combining marks, digits and
+          <code>. _ / space + @ , : = ~ ( ) -</code>), so nothing typed later needs
+          escaping. Before any hc call the hook checks <code>/proc/net/unix</code>
+          for a core listening on the pane's socket
+          (<code>$HC_SOCKET</code>, else <code>$HC_TERMINAL_SOCKET</code>, else the
+          default under <code>$XDG_RUNTIME_DIR</code>), because an hc call would
+          start one and <code>$HC_TERMINAL_ID</code> outlives the core in tmux.
+          Without <code>/proc</code> or any of those paths it trusts
+          <code>$HC_TERMINAL_ID</code>. <code>SessionEnd</code> clears the label on
+          <code>prompt_input_exit</code> or <code>logout</code> only.
+          <code>keel resume</code> types <code>claude --resume &lt;id&gt;</code>,
+          after asking, into labelled terminals whose root is a shell, whose
+          foreground is that same shell process, and where the core reports no
+          agent, and whose shell is at least ten seconds old by <code>ps -o
+          etime</code>: a recovered shell is its own foreground while it still runs
+          its rc file, and hc reports no prompt, so age is the evidence. An rc file
+          silent for longer than that can still be cut short. hc's foreground is the
+          process-group leader, so resume also reads the shell's children with
+          <code>ps</code> and skips one with a stopped child (a Claude suspended with
+          Ctrl+Z) or a child in its terminal's foreground group (job control off).
+          It skips terminals on connected machines (<code>machine/t7</code>), whose
+          pids this machine's <code>ps</code> can't see, and any session labelled on
+          more than one pane, or while a pane hc can't describe might hold it; that
+          check re-runs before each pane, not only when listing. A lock file in
+          <code>$XDG_RUNTIME_DIR</code> (else the temp directory) holds the typing
+          run's pid: it is hard-linked into place whole, a dead holder's lock is
+          renamed over, and each run confirms it still holds the lock before each
+          Ctrl+C and send, stopping if not. <code>--dry-run</code> takes
+          no lock. <code>hc send</code>
+          pastes onto a person's draft once it is 60 seconds old (herdr-core's
+          default), so for each pane resume re-checks, presses Ctrl+C (dropping any
+          unsent line), re-checks again, and sends with a six-second cap; a send hc
+          is still holding then is killed, which cancels it untyped. A program
+          started between the last check and the paste still gets the text. It
+          types into sh-family shells and fish, prints the commands for the other
+          shells it knows (nu, PowerShell, tcsh/csh, elvish, xonsh, busybox), and
+          leaves a pane whose foreground it doesn't recognise as a shell alone. <code>keel doctor</code>
+          warns about unlabelled Claude panes, asking hc only when the same socket
+          check finds a core listening, since any hc command starts one. <code>KEEL_HERDR_OFF=1</code> turns the hook off.</p>
+        </div>
+
+        <div class="spec">
           <h3 id="memory-wiring">memory wiring</h3>
           <p>Third-party memory engines plug in as bridge plugins that declare MCP
           servers in <code>.mcp.json</code>, which Claude Code documents. keel ships no
@@ -125,11 +178,17 @@ import Base from "../layouts/Base.astro";
         <div class="spec">
           <h3 id="cli">the cli</h3>
           <p><code>keel status · log · recall · search · retain-id · doctor · setup ·
-          settings · update · migrate · link</code></p>
-          <p>Mostly read-only and flags first. Its writes are idempotent and go only to
-          the <code>KEEL_*</code> keys it owns, plus, with your explicit consent, the
-          <code>permissions</code> rules <code>keel settings --yes</code> appends. It
-          backs up the previous state before its first write. It's on the Bash tool's
+          settings · update · migrate · link · resume</code></p>
+          <p>Mostly read-only and flags first. Its file writes are idempotent and go
+          only to the <code>KEEL_*</code> keys it owns, plus, with your explicit
+          consent, the <code>permissions</code> rules <code>keel settings --yes</code>
+          appends. It backs up the previous state before its first file write. The one
+          write that isn't a file is <code>keel resume</code>, which, after asking,
+          types a resume command into herdr-core panes; it has no backup, and its undo
+          is the pane itself. Its only files are a lock holding its pid and a
+          pid-named temp file beside it, both removed when it exits normally; a run
+          killed by a signal leaves them, and the next run takes over a lock whose
+          pid is gone. It's on the Bash tool's
           PATH, not your shell's, so in practice Claude runs it for you.
           <code>keel update</code> checks the commit SHA and ignores the version
           string. <code>keel search</code> sends one query to a Hindsight bank's recall
@@ -233,8 +292,10 @@ import Base from "../layouts/Base.astro";
       </ul>
       <p class="sub">Every guard has an off switch: <code>KEEL_GUARD_OFF</code>,
       <code>KEEL_ACTIVITY_OFF</code>, <code>KEEL_TRAILERS_OFF</code>,
-      <code>KEEL_INGEST_OFF</code>, <code>KEEL_RECALL_OFF</code>. Every write has a backup
-      and an undo. A guard that breaks your workflow is a guard you'll eventually turn
+      <code>KEEL_INGEST_OFF</code>, <code>KEEL_RECALL_OFF</code>,
+      <code>KEEL_HERDR_OFF</code>. Every write to a file has a backup and an undo;
+      the herdr labels and <code>keel resume</code> write to terminals instead, and
+      their undo is <code>hc label</code> or the pane itself. A guard that breaks your workflow is a guard you'll eventually turn
       off. So the ingest boundary never blocks, the log never calls a model, and
       <a href="https://github.com/redlinelabs-dev/keel/blob/main/docs/UNINSTALL.md">the whole
       layer comes out in two commands</a>.</p>

@@ -14,7 +14,7 @@ The point is leverage, not bulk — a minimal customization of the stock tool th
 a second brain across projects and machines, without keel ever becoming a second
 product you maintain.
 
-> **Status:** v0.9, personal tool built in the open. Issues and PRs welcome and may be
+> **Status:** v0.10, personal tool built in the open. Issues and PRs welcome and may be
 > politely declined. Fork freely; that's what the licence is for.
 
 ---
@@ -173,6 +173,41 @@ network, and silence on most prompts by design: a memory that volunteers noise
 gets tuned out. `keel recall "<prompt>"` shows what a prompt would receive;
 `KEEL_RECALL_OFF=1` disables it.
 
+### Session resume in herdr-core
+
+herdr-core (`hc`, Herdr's terminal server) keeps terminals alive while their machine
+is up. After a reboot — and every Windows restart, for a core running in WSL2 —
+each kept terminal (herdr-app keeps the ones in its panes) comes back as a shell
+and its program is not run again, so a pane that held Claude is now an empty
+prompt. `claude -r` lists every session from that folder, which is guesswork when
+several panes started in the same one.
+
+Inside an hc terminal, a `SessionStart` hook labels the terminal with the
+session's id and folder (`claude.session`, `claude.cwd`), taken from the
+documented hook payload. It labels only when the Claude that ran it is the
+terminal's foreground program, so a nested `claude -p` can't overwrite it, and
+only for a folder whose path is letters (any alphabet, accents included), digits
+and `. _ / space + @ , : = ~ ( ) -`.
+`/exit` clears the label; a reboot doesn't give Claude the chance to. After a
+reboot, `keel resume` lists the labelled panes whose own shell is the foreground
+program, asks once, and types `claude --resume <id>` into each. It types into
+sh-family shells and fish; for nu or PowerShell it prints the commands for you.
+A pane with a program in front of its shell, or a stopped job under it, is left
+alone, and so is a shell that started less than ten seconds ago, since it may
+still be loading its startup files; run `keel resume` again for those. So is a
+session whose label is on more than one pane (a Claude that crashed leaves its
+label behind), and a pane on another machine connected to herdr-core: run
+`keel resume` there. A second `keel resume` started while one is typing stops
+instead of typing too (a `--dry-run` doesn't count). Before typing it
+presses Ctrl+C to clear the pane's command line, so anything unsent there is
+dropped (it stays visible above the new prompt), checks the pane again, and
+gives up on a pane where hc holds the send because someone is typing. A program
+started in that pane in the moment between the last check and the typing would
+still get the text; hc has no way to send only if the shell is still in front.
+`keel doctor` warns about Claude panes with no label, when a herdr-core is
+already running. `KEEL_HERDR_OFF=1` disables the hook. Outside herdr-core it
+does nothing.
+
 ### Commit hygiene
 
 Blocks unwanted attribution trailers in commit messages. Whether you want those in your git
@@ -288,6 +323,9 @@ keel migrate   restore marketplaces + plugins from a config a reset moved
                 config is on disk, which is indefinitely — and the repair
                 works even when it is long gone)
 keel link      put keel on your PATH (--dir, default ~/.local/bin)
+keel resume    after a reboot, type `claude --resume <id>` into each
+               herdr-core pane the session hook labelled whose shell is
+               the foreground program (asks first; --yes, --dry-run)
 ```
 
 If you'd rather type it yourself, `keel link` puts it in `~/.local/bin` — the
@@ -304,9 +342,11 @@ update` migrates an old symlink the first time it sees one, and never touches a
 file keel didn't write.
 
 `keel` owns no runtime. It configures other people's tools and gets out of the way — which
-means every write is idempotent and surgical. It touches the `KEEL_*` keys it owns in
+means every file write is idempotent and surgical. It touches the `KEEL_*` keys it owns in
 `settings.json` — plus, with your explicit consent, the `permissions` rules `keel settings
 --yes` appends — backs the file up before the first write, and preserves everything else.
+The one write that isn't to a file is `keel resume`, which types into herdr-core panes
+after asking; its undo is the pane.
 Config files belong to the user; a setup tool that clobbers them is a bug with a nice
 interface.
 

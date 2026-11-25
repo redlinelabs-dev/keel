@@ -48,8 +48,10 @@ the central design decision of this project.
 
 ## Acknowledged exceptions — undocumented, depended on, said out loud
 
-The rule says a feature needing an undocumented surface does not ship. Four
-shipped anyway, as repairs for observed breakage, and a cold review
+The rule says a feature needing an undocumented surface does not ship. Five
+shipped anyway, as repairs for observed breakage (the fifth: Claude panes
+that came back empty after a reboot, with no record of which session had
+been in each), and a cold review
 (2026-07-30) caught the code calling one of them "documented." It is not, and
 pretending was worse than depending. Each is listed with its blast radius and
 the condition under which keel stops touching it.
@@ -60,6 +62,7 @@ the condition under which keel stops touching it.
 | `~/.claude.json` — `officialMarketplaceAutoInstall*` keys (write), `mcpServers`/`projects` maps (read) | `keel migrate` repairs the one state no vanilla install can reach; `keel doctor` detects backends wired outside keel | the repair becomes a no-op; doctor's external-wiring note disappears; nothing else is affected | Claude Code repairs that state itself / documents an MCP inventory surface |
 | `known_marketplaces.json` (read) | `keel migrate` lists what this machine already has, so a re-run proposes only what is missing | migrate over-proposes and the user declines duplicates — annoying, not harmful | a documented marketplace inventory appears (treated as undocumented until a docs link is found) |
 | `plugins/marketplaces/keel` git checkout | `keel update` fast-forwards a checkout that `marketplace update` has been observed to leave stale | ff-only on a clean tree — the worst case is "already up to date," the state it started in | `marketplace update` reliably moves the checkout |
+| How processes are spawned (not a file — process ancestry, read with `ps`): hook commands as descendants of the session's own process, through a shell; tool commands outside the terminal's foreground process group | the herdr-session hook labels a herdr-core terminal only when the Claude that ran it is the terminal's foreground program, so a nested `claude -p` run by a tool can't overwrite the label | labels stop being written; `keel doctor` warns about the Claude panes herdr-core reports with no usable label; resume and sessions are otherwise unaffected | a documented hook field identifies the top-level interactive session |
 
 These are exceptions, not precedent: each exists because the breakage was
 observed on a real machine, each fails toward doing nothing, and each names
